@@ -117,6 +117,16 @@ st.sidebar.caption(
 # HELPER FUNCTIONS
 # ------------------------------------------------------------
 
+def is_text_column(series):
+    """
+    Detects text/string columns. Newer pandas versions can read CSV
+    text columns in as a "string" dtype instead of the classic
+    "object" dtype, so we check for both to avoid silently missing
+    columns like Attrition, OverTime, etc.
+    """
+    return series.dtype == "object" or pd.api.types.is_string_dtype(series)
+
+
 def find_column(df, possible_names):
     """
     Finds a column even when the uploaded dataset uses
@@ -157,7 +167,7 @@ def convert_binary_columns(df):
 
     for column in df.columns:
 
-        if df[column].dtype == "object":
+        if is_text_column(df[column]):
 
             cleaned = (
                 df[column]
@@ -199,7 +209,7 @@ def prepare_target(df):
 
     target = df[target_column].copy()
 
-    if target.dtype == "object":
+    if is_text_column(target):
 
         target = (
             target
@@ -252,7 +262,7 @@ def clean_dataset(raw_df):
     # Try to convert numeric-looking columns
     for column in df.columns:
 
-        if df[column].dtype == "object":
+        if is_text_column(df[column]):
 
             converted = pd.to_numeric(
                 df[column],
