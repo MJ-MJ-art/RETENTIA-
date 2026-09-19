@@ -917,6 +917,169 @@ if numeric_columns:
 
 
 # ------------------------------------------------------------
+# INDIVIDUAL EMPLOYEE RISK SCORES
+# ------------------------------------------------------------
+
+st.markdown(
+    '<div class="section-title">Employee risk scores</div>',
+    unsafe_allow_html=True
+)
+
+# Predict a risk score for every employee in the uploaded dataset,
+# not just the held-out test set used to measure accuracy.
+all_risk_scores = pipeline.predict_proba(X)[:, 1]
+
+results_df = data.copy()
+results_df["RiskScore"] = all_risk_scores * 100
+
+
+def risk_label(score):
+    if score >= 66:
+        return "High risk"
+    elif score >= 33:
+        return "Medium risk"
+    else:
+        return "Low risk"
+
+
+results_df["RiskLevel"] = results_df["RiskScore"].apply(risk_label)
+
+# Try to find an identifier column to show in the lookup and table.
+# If none exists, fall back to a simple row number so lookup still works.
+id_column = find_column(
+    data,
+    ["EmployeeID", "EmployeeNumber", "ID", "Employee Id"]
+)
+
+if id_column is None:
+    results_df["RowNumber"] = range(1, len(results_df) + 1)
+    id_column = "RowNumber"
+
+st.caption(
+    "Risk scores are calculated for every employee in the uploaded "
+    "dataset using the trained model. Scores reflect patterns found "
+    "in this dataset and should be reviewed alongside other evidence, "
+    "not used as the sole basis for decisions about individual "
+    "employees."
+)
+
+
+# ------------------------------------------------------------
+# LOOK UP AN EMPLOYEE
+# ------------------------------------------------------------
+
+st.subheader("Look up an employee")
+
+selected_id = st.selectbox(
+    "Select an employee",
+    options=results_df[id_column].astype(str).tolist()
+)
+
+employee_row = results_df[
+    results_df[id_column].astype(str) == selected_id
+].iloc[0]
+
+lookup_col1, lookup_col2 = st.columns(2)
+
+with lookup_col1:
+    st.metric(
+        "Risk score",
+        f"{employee_row['RiskScore']:.0f}%"
+    )
+
+with lookup_col2:
+    st.metric(
+        "Risk level",
+        employee_row["RiskLevel"]
+    )
+
+# Show key employee details (excluding the target and id columns)
+detail_columns = [
+    column for column in data.columns
+    if column not in [target_column, id_column]
+][:10]
+
+st.write("**Employee details:**")
+
+details_table = pd.DataFrame({
+    "Attribute": detail_columns,
+    "Value": [employee_row[column] for column in detail_columns]
+})
+
+st.dataframe(
+    details_table,
+    use_container_width=True,
+    hide_index=True
+)
+
+# Show the top contributing factors for this employee, based on the
+# numeric features with the largest overall difference between
+# employees who stayed and employees who left (computed above in
+# the "Largest numeric differences between groups" section).
+if numeric_columns and "pattern_df" in dir():
+
+    st.write("**Top factors for this employee:**")
+
+    top_pattern_features = pattern_df["Feature"].head(3).tolist()
+
+    for feature in top_pattern_features:
+
+        if feature in employee_row.index:
+
+            employee_value = employee_row[feature]
+
+            feature_pattern = pattern_df[
+                pattern_df["Feature"] == feature
+            ].iloc[0]
+
+            stayed_avg = feature_pattern["Stayed average"]
+            left_avg = feature_pattern["Left average"]
+
+            closer_to_left = (
+                abs(employee_value - left_avg)
+                < abs(employee_value - stayed_avg)
+            )
+
+            direction = (
+                "closer to the pattern seen in employees who left"
+                if closer_to_left
+                else "closer to the pattern seen in employees who stayed"
+            )
+
+            st.write(
+                f"- **{feature}**: this employee's value is "
+                f"**{employee_value:.1f}** ({direction}). "
+                f"Average for employees who left: {left_avg:.1f}, "
+                f"average for employees who stayed: {stayed_avg:.1f}."
+            )
+
+st.markdown("---")
+
+
+# ------------------------------------------------------------
+# ALL EMPLOYEES RANKED BY RISK
+# ------------------------------------------------------------
+
+st.subheader("All employees ranked by risk")
+
+ranked_columns = [id_column, "RiskScore", "RiskLevel"]
+
+if department_column and department_column in results_df.columns:
+    ranked_columns.insert(1, department_column)
+
+ranked_table = results_df[ranked_columns].sort_values(
+    "RiskScore",
+    ascending=False
+)
+
+st.dataframe(
+    ranked_table.style.format({"RiskScore": "{:.0f}%"}),
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# ------------------------------------------------------------
 # OVERALL FINDINGS
 # ------------------------------------------------------------
 
