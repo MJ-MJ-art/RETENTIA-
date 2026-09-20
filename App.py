@@ -33,6 +33,8 @@ from sklearn.impute import SimpleImputer
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score
 
+from supabase import create_client, Client
+
 # ------------------------------------------------------------
 # PAGE CONFIGURATION
 # ------------------------------------------------------------
@@ -178,14 +180,169 @@ st.markdown(
 )
 
 # ------------------------------------------------------------
+# SUPABASE CLIENT (accounts + saved data)
+# ------------------------------------------------------------
+# Credentials come from Streamlit's private Secrets area, never from
+# a file in the GitHub repository.
+
+@st.cache_resource
+def get_supabase_client():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+
+supabase: Client = get_supabase_client()
+
+# ------------------------------------------------------------
 # SESSION STATE
 # ------------------------------------------------------------
+
+if "user" not in st.session_state:
+    st.session_state.user = None
 
 if "analyzed" not in st.session_state:
     st.session_state.analyzed = False
 
+
+def load_saved_results(user_id):
+    """
+    Looks up this user's most recently saved analysis in Supabase
+    and, if one exists, loads it into session state so the Employee
+    Lookup page works immediately without re-uploading a CSV.
+    """
+
+    try:
+        response = (
+            supabase.table("retentia_results")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        if response.data:
+
+            row = response.data[0]
+
+            st.session_state.results_df = pd.DataFrame(row["results_json"])
+            st.session_state.pattern_df = pd.DataFrame(row["pattern_json"])
+            st.session_state.id_column = row["id_column"]
+            st.session_state.department_column = row["department_column"]
+            st.session_state.target_column = row["target_column"]
+            st.session_state.data_columns = row["data_columns"]
+            st.session_state.analyzed = True
+
+    except Exception:
+        # No saved data yet, or the lookup failed. Not a critical
+        # error - the user can just analyze data fresh instead.
+        pass
+
+
+def save_results_to_db(user_id):
+    """
+    Saves the current analysis results to Supabase, tied to this
+    user's account, so they're still there next time they log in.
+    """
+
+    import json
+
+    try:
+        # Round-trip through pandas' own JSON conversion (rather than
+        # .to_dict()) so every value is guaranteed to be a plain,
+        # JSON-safe type before it's sent to the database - this
+        # avoids errors from pandas/numpy number types that plain
+        # .to_dict() can sometimes leave behind.
+        results_json = json.loads(
+            st.session_state.results_df.to_json(orient="records")
+        )
+        pattern_json = json.loads(
+            st.session_state.pattern_df.to_json(orient="records")
+        )
+
+        supabase.table("retentia_results").insert({
+            "user_id": user_id,
+            "results_json": results_json,
+            "pattern_json": pattern_json,
+            "id_column": st.session_state.id_column,
+            "department_column": st.session_state.department_column,
+            "target_column": st.session_state.target_column,
+            "data_columns": st.session_state.data_columns,
+        }).execute()
+
+    except Exception as error:
+        st.warning(f"Could not save your results to your account: {error}")
+
+
 # ------------------------------------------------------------
-# SIDEBAR NAVIGATION
+# LOGIN / SIGN UP GATE
+# ------------------------------------------------------------
+# Nothing else in the app renders until the user is logged in.
+
+if st.session_state.user is None:
+
+    st.markdown(
+        '<div class="info-box">'
+        '<strong>Log in or create an account to continue.</strong><br><br>'
+        'Your saved analysis will be tied to your account, so it is '
+        'still here the next time you log in.'
+        '</div>',
+        unsafe_allow_html=True
+    )
+
+    auth_mode = st.radio(
+        "Choose an option",
+        ["Log in", "Sign up"],
+        horizontal=True,
+        label_visibility="collapsed"
+    )
+
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+
+    if auth_mode == "Log in":
+
+        if st.button("Log in"):
+
+            try:
+                res = supabase.auth.sign_in_with_password({
+                    "email": email,
+                    "password": password
+                })
+
+                st.session_state.user = res.user
+                load_saved_results(res.user.id)
+                st.rerun()
+
+            except Exception as error:
+                st.error(f"Could not log in: {error}")
+
+    else:
+
+        if st.button("Sign up"):
+
+            try:
+                supabase.auth.sign_up({
+                    "email": email,
+                    "password": password
+                })
+
+                st.success(
+                    "Account created. Depending on your project's "
+                    "settings, you may need to confirm your email "
+                    "before logging in - check your inbox, then switch "
+                    "to \"Log in\" above."
+                )
+
+            except Exception as error:
+                st.error(f"Could not sign up: {error}")
+
+    st.stop()
+
+
+# ------------------------------------------------------------
+# SIDEBAR NAVIGATION (only reached once logged in)
 # ------------------------------------------------------------
 
 st.sidebar.markdown(
@@ -193,6 +350,8 @@ st.sidebar.markdown(
     '<div class="sidebar-tagline">Attrition analytics</div>',
     unsafe_allow_html=True
 )
+
+st.sidebar.caption(f"Logged in as {st.session_state.user.email}")
 
 page = st.sidebar.radio(
     "Navigate",
@@ -208,6 +367,11 @@ else:
     st.sidebar.caption(
         "No data analyzed yet. Go to the Analyze page to upload a CSV."
     )
+
+if st.sidebar.button("Log out"):
+    st.session_state.user = None
+    st.session_state.analyzed = False
+    st.rerun()
 
 
 def risk_badge_html(risk_level):
@@ -1007,9 +1171,15 @@ employee feedback, organizational context, and other evidence.
     st.session_state.target_column = target_column
     st.session_state.data_columns = list(data.columns)
 
+    # Also save it to this user's account in Supabase, so it's still
+    # here the next time they log in - not just for the rest of this
+    # browser session.
+    save_results_to_db(st.session_state.user.id)
+
     st.success(
-        "Analysis complete. Go to the Employee Lookup page to explore "
-        "individual employees, or upload a new file above to re-analyze."
+        "Analysis complete and saved to your account. Go to the "
+        "Employee Lookup page to explore individual employees, or "
+        "upload a new file above to re-analyze."
     )
 
 
