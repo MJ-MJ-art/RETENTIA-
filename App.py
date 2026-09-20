@@ -163,23 +163,6 @@ st.markdown(
 )
 
 # ------------------------------------------------------------
-# HEADER (shown on every page)
-# ------------------------------------------------------------
-
-st.markdown(
-    '<div class="main-title">Retentia</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown(
-    '<div class="subtitle">'
-    'Employee attrition analytics that helps organizations understand '
-    'retention patterns and take evidence-based action.'
-    '</div>',
-    unsafe_allow_html=True
-)
-
-# ------------------------------------------------------------
 # SUPABASE CLIENT (accounts + saved data)
 # ------------------------------------------------------------
 # Credentials come from Streamlit's private Secrets area, never from
@@ -409,68 +392,144 @@ def load_specific_analysis(row_id):
 # LOGIN / SIGN UP GATE
 # ------------------------------------------------------------
 # Nothing else in the app renders until the user is logged in.
+# This screen is deliberately centered and card-styled, unlike the
+# rest of the app, since it's the first thing anyone ever sees.
 
 if st.session_state.user is None:
 
     st.markdown(
-        '<div class="info-box">'
-        '<strong>Log in or create an account to continue.</strong><br><br>'
-        'Your saved analysis will be tied to your account, so it is '
-        'still here the next time you log in.'
-        '</div>',
+        """
+        <style>
+            .login-card {
+                max-width: 420px;
+                margin: 40px auto 0 auto;
+                padding: 36px 34px 28px 34px;
+                background-color: #131615;
+                border: 1px solid #1F2422;
+                border-radius: 14px;
+            }
+
+            .login-title {
+                font-family: 'Space Grotesk', sans-serif;
+                font-size: 30px;
+                font-weight: 700;
+                text-align: center;
+                background: linear-gradient(90deg, #F2F4F3 40%, #34D399 100%);
+                -webkit-background-clip: text;
+                background-clip: text;
+                color: transparent;
+                margin-bottom: 4px;
+            }
+
+            .login-subtitle {
+                text-align: center;
+                font-size: 14px;
+                color: #8A928F;
+                margin-bottom: 26px;
+            }
+
+            div[data-testid="stForm"] {
+                border: none;
+                padding: 0;
+            }
+        </style>
+        """,
         unsafe_allow_html=True
     )
 
-    auth_mode = st.radio(
-        "Choose an option",
-        ["Log in", "Sign up"],
-        horizontal=True,
-        label_visibility="collapsed"
-    )
+    left_spacer, center_col, right_spacer = st.columns([1, 1.3, 1])
 
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
+    with center_col:
 
-    if auth_mode == "Log in":
+        st.markdown(
+            '<div class="login-card">'
+            '<div class="login-title">Retentia</div>'
+            '<div class="login-subtitle">'
+            'Log in or create an account to continue'
+            '</div>'
+            '</div>',
+            unsafe_allow_html=True
+        )
 
-        if st.button("Log in"):
+        auth_mode = st.radio(
+            "Choose an option",
+            ["Log in", "Sign up"],
+            horizontal=True,
+            label_visibility="collapsed"
+        )
 
-            try:
-                res = supabase.auth.sign_in_with_password({
-                    "email": email,
-                    "password": password
-                })
+        with st.form("auth_form"):
 
-                st.session_state.user = res.user
-                load_saved_results(res.user.id)
-                load_preferences(res.user.id)
-                st.rerun()
+            email = st.text_input("Email", placeholder="you@company.com")
+            password = st.text_input(
+                "Password", type="password", placeholder="••••••••"
+            )
 
-            except Exception as error:
-                st.error(f"Could not log in: {error}")
+            submitted = st.form_submit_button(
+                auth_mode,
+                use_container_width=True
+            )
 
-    else:
+        if submitted:
 
-        if st.button("Sign up"):
+            if auth_mode == "Log in":
 
-            try:
-                supabase.auth.sign_up({
-                    "email": email,
-                    "password": password
-                })
+                try:
+                    res = supabase.auth.sign_in_with_password({
+                        "email": email,
+                        "password": password
+                    })
 
-                st.success(
-                    "Account created. Depending on your project's "
-                    "settings, you may need to confirm your email "
-                    "before logging in - check your inbox, then switch "
-                    "to \"Log in\" above."
-                )
+                    st.session_state.user = res.user
+                    load_saved_results(res.user.id)
+                    load_preferences(res.user.id)
+                    st.rerun()
 
-            except Exception as error:
-                st.error(f"Could not sign up: {error}")
+                except Exception as error:
+                    st.error(f"Could not log in: {error}")
+
+            else:
+
+                try:
+                    supabase.auth.sign_up({
+                        "email": email,
+                        "password": password
+                    })
+
+                    st.success(
+                        "Account created. Depending on your project's "
+                        "settings, you may need to confirm your email "
+                        "before logging in - check your inbox, then "
+                        "switch to \"Log in\" above."
+                    )
+
+                except Exception as error:
+                    st.error(f"Could not sign up: {error}")
+
+        st.caption(
+            "Your data is kept private to your account and is never "
+            "visible to other users."
+        )
 
     st.stop()
 
+
+# ------------------------------------------------------------
+# HEADER (shown on every page once logged in)
+# ------------------------------------------------------------
+
+st.markdown(
+    '<div class="main-title">Retentia</div>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    '<div class="subtitle">'
+    'Employee attrition analytics that helps organizations understand '
+    'retention patterns and take evidence-based action.'
+    '</div>',
+    unsafe_allow_html=True
+)
 
 # ------------------------------------------------------------
 # SIDEBAR NAVIGATION (only reached once logged in)
