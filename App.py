@@ -11,6 +11,14 @@
 # Data and results from the Analyze page are kept in st.session_state
 # so they are still available when the user switches to the
 # Employee Lookup page, without needing to re-upload.
+#
+# Visual theme lives in two places:
+#   - .streamlit/config.toml sets the base dark theme and accent color
+#     (this is what Streamlit uses for buttons, sliders, the sidebar
+#     radio, etc.)
+#   - The CSS block below adds custom touches config.toml can't do:
+#     the gradient wordmark, fonts, section accent bars, and the
+#     colored risk badges.
 # ============================================================
 
 import streamlit as st
@@ -36,35 +44,116 @@ st.set_page_config(
 )
 
 # ------------------------------------------------------------
-# SIMPLE PRODUCT STYLING
+# BRAND STYLING
 # ------------------------------------------------------------
 
 st.markdown(
     """
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap');
+
+        html, body, [class*="css"] {
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* ---------- Wordmark ---------- */
+        .brand-row {
+            display: flex;
+            align-items: baseline;
+            gap: 14px;
+            margin-bottom: 2px;
+        }
+
         .main-title {
-            font-size: 42px;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 44px;
             font-weight: 700;
-            margin-bottom: 5px;
+            letter-spacing: -0.5px;
+            background: linear-gradient(90deg, #F2F4F3 0%, #F2F4F3 55%, #34D399 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            margin: 0;
         }
 
         .subtitle {
-            font-size: 18px;
-            color: #666;
-            margin-bottom: 25px;
+            font-size: 16px;
+            color: #8A928F;
+            margin-bottom: 28px;
+            max-width: 620px;
         }
 
+        /* ---------- Section headers ---------- */
         .section-title {
-            font-size: 25px;
-            font-weight: 650;
-            margin-top: 30px;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 22px;
+            font-weight: 700;
+            margin-top: 34px;
+            margin-bottom: 6px;
+            padding-left: 14px;
+            border-left: 3px solid #10B981;
+            color: #F2F4F3;
         }
 
+        /* ---------- Info / welcome box ---------- */
         .info-box {
-            padding: 18px;
+            padding: 20px 22px;
             border-radius: 10px;
-            background-color: #f5f7fb;
-            margin-bottom: 20px;
+            background-color: #131615;
+            border: 1px solid #1F2422;
+            margin-bottom: 22px;
+            color: #F2F4F3;
+        }
+
+        /* ---------- Sidebar ---------- */
+        section[data-testid="stSidebar"] {
+            background-color: #0A0B0A;
+            border-right: 1px solid #1F2422;
+        }
+
+        .sidebar-brand {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(90deg, #F2F4F3 40%, #34D399 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            margin-bottom: 4px;
+        }
+
+        .sidebar-tagline {
+            font-size: 12px;
+            color: #6B726F;
+            margin-bottom: 18px;
+        }
+
+        /* ---------- Risk badges ---------- */
+        .risk-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .risk-high {
+            background-color: rgba(239, 68, 68, 0.15);
+            color: #F87171;
+            border: 1px solid rgba(239, 68, 68, 0.35);
+        }
+
+        .risk-medium {
+            background-color: rgba(245, 158, 11, 0.15);
+            color: #FBBF24;
+            border: 1px solid rgba(245, 158, 11, 0.35);
+        }
+
+        .risk-low {
+            background-color: rgba(16, 185, 129, 0.15);
+            color: #34D399;
+            border: 1px solid rgba(16, 185, 129, 0.35);
         }
     </style>
     """,
@@ -91,10 +180,6 @@ st.markdown(
 # ------------------------------------------------------------
 # SESSION STATE
 # ------------------------------------------------------------
-# This is what lets the app "remember" the analysis when the user
-# moves from the Analyze page to the Employee Lookup page, within
-# the same browser session. It does NOT persist after the browser
-# tab is closed or the app is reloaded from scratch.
 
 if "analyzed" not in st.session_state:
     st.session_state.analyzed = False
@@ -103,11 +188,16 @@ if "analyzed" not in st.session_state:
 # SIDEBAR NAVIGATION
 # ------------------------------------------------------------
 
-st.sidebar.title("Retentia")
+st.sidebar.markdown(
+    '<div class="sidebar-brand">Retentia</div>'
+    '<div class="sidebar-tagline">Attrition analytics</div>',
+    unsafe_allow_html=True
+)
 
 page = st.sidebar.radio(
     "Navigate",
-    ["Home", "Analyze", "Employee Lookup", "About"]
+    ["Home", "Analyze", "Employee Lookup", "About"],
+    label_visibility="collapsed"
 )
 
 st.sidebar.markdown("---")
@@ -118,6 +208,22 @@ else:
     st.sidebar.caption(
         "No data analyzed yet. Go to the Analyze page to upload a CSV."
     )
+
+
+def risk_badge_html(risk_level):
+    """
+    Returns an HTML span styled as a colored badge for a risk level,
+    used wherever risk level is displayed so it's easy to scan
+    (green = low, amber = medium, red = high).
+    """
+
+    css_class = {
+        "High risk": "risk-high",
+        "Medium risk": "risk-medium",
+        "Low risk": "risk-low"
+    }.get(risk_level, "risk-medium")
+
+    return f'<span class="risk-badge {css_class}">{risk_level}</span>'
 
 # ------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -450,10 +556,11 @@ if page == "Home":
 
     st.markdown(
         '<div class="info-box">'
-        '<strong>Welcome to Retentia.</strong><br><br>'
-        'Retentia helps organizations understand why employees leave, '
-        'using their own workforce data — no manual spreadsheet '
-        'digging required.'
+        '<strong style="color:#34D399;">Turn "why are people leaving?" '
+        'into an answer.</strong><br><br>'
+        'Retentia analyzes your workforce data to show which employees '
+        'are at risk of leaving, why, and what to do about it — before '
+        'they hand in notice.'
         '</div>',
         unsafe_allow_html=True
     )
@@ -957,7 +1064,11 @@ elif page == "Employee Lookup":
             st.metric("Risk score", f"{employee_row['RiskScore']:.0f}%")
 
         with lookup_col2:
-            st.metric("Risk level", employee_row["RiskLevel"])
+            st.write("")
+            st.markdown(
+                risk_badge_html(employee_row["RiskLevel"]),
+                unsafe_allow_html=True
+            )
 
         detail_columns = [
             column for column in st.session_state.data_columns
@@ -1022,8 +1133,18 @@ elif page == "Employee Lookup":
             "RiskScore", ascending=False
         )
 
+        def color_risk_level(value):
+            colors = {
+                "High risk": "color: #F87171; font-weight: 600;",
+                "Medium risk": "color: #FBBF24; font-weight: 600;",
+                "Low risk": "color: #34D399; font-weight: 600;"
+            }
+            return colors.get(value, "")
+
         st.dataframe(
-            ranked_table.style.format({"RiskScore": "{:.0f}%"}),
+            ranked_table.style
+                .format({"RiskScore": "{:.0f}%"})
+                .applymap(color_risk_level, subset=["RiskLevel"]),
             use_container_width=True,
             hide_index=True
         )
