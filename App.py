@@ -1420,121 +1420,138 @@ elif page == "Employee Lookup":
             "decisions about individual employees."
         )
 
-        st.subheader("Look up an employee")
+        search_tab, ranking_tab = st.tabs(["🔍 Search", "📋 Full ranking"])
 
-        selected_id = st.selectbox(
-            "Select an employee",
-            options=results_df[id_column].astype(str).tolist()
-        )
+        # ----------------------------------------------------
+        # TAB: SEARCH
+        # ----------------------------------------------------
 
-        employee_row = results_df[
-            results_df[id_column].astype(str) == selected_id
-        ].iloc[0]
+        with search_tab:
 
-        lookup_col1, lookup_col2 = st.columns(2)
+            st.subheader("Look up an employee")
 
-        with lookup_col1:
-            st.metric("Risk score", f"{employee_row['RiskScore']:.0f}%")
-
-        with lookup_col2:
-            st.write("")
-            st.markdown(
-                risk_badge_html(employee_row["RiskLevel"]),
-                unsafe_allow_html=True
+            selected_id = st.selectbox(
+                "Select an employee",
+                options=results_df[id_column].astype(str).tolist()
             )
 
-        detail_columns = [
-            column for column in st.session_state.data_columns
-            if column not in [target_column, id_column]
-        ][:10]
+            employee_row = results_df[
+                results_df[id_column].astype(str) == selected_id
+            ].iloc[0]
 
-        st.write("**Employee details:**")
+            lookup_col1, lookup_col2 = st.columns(2)
 
-        details_table = pd.DataFrame({
-            "Attribute": detail_columns,
-            "Value": [employee_row[column] for column in detail_columns]
-        })
+            with lookup_col1:
+                st.metric("Risk score", f"{employee_row['RiskScore']:.0f}%")
 
-        st.dataframe(details_table, use_container_width=True, hide_index=True)
+            with lookup_col2:
+                st.write("")
+                st.markdown(
+                    risk_badge_html(employee_row["RiskLevel"]),
+                    unsafe_allow_html=True
+                )
 
-        if not pattern_df.empty:
+            detail_columns = [
+                column for column in st.session_state.data_columns
+                if column not in [target_column, id_column]
+            ][:10]
 
-            st.write("**Top factors for this employee:**")
+            st.write("**Employee details:**")
 
-            top_pattern_features = pattern_df["Feature"].head(3).tolist()
+            details_table = pd.DataFrame({
+                "Attribute": detail_columns,
+                "Value": [employee_row[column] for column in detail_columns]
+            })
 
-            for feature in top_pattern_features:
-
-                if feature in employee_row.index:
-
-                    employee_value = employee_row[feature]
-                    feature_pattern = pattern_df[
-                        pattern_df["Feature"] == feature
-                    ].iloc[0]
-
-                    stayed_avg = feature_pattern["Stayed average"]
-                    left_avg = feature_pattern["Left average"]
-
-                    closer_to_left = (
-                        abs(employee_value - left_avg)
-                        < abs(employee_value - stayed_avg)
-                    )
-
-                    direction = (
-                        "closer to the pattern seen in employees who left"
-                        if closer_to_left
-                        else "closer to the pattern seen in employees who stayed"
-                    )
-
-                    st.write(
-                        f"- **{feature}**: this employee's value is "
-                        f"**{employee_value:.1f}** ({direction}). "
-                        f"Average for employees who left: {left_avg:.1f}, "
-                        f"average for employees who stayed: {stayed_avg:.1f}."
-                    )
-
-        st.markdown("---")
-
-        st.subheader("All employees ranked by risk")
-
-        ranked_columns = [id_column, "RiskScore", "RiskLevel"]
-
-        if department_column and department_column in results_df.columns:
-            ranked_columns.insert(1, department_column)
-
-        ranked_table = results_df[ranked_columns].sort_values(
-            "RiskScore", ascending=False
-        )
-
-        def color_risk_level(value):
-            colors = {
-                "High risk": "color: #F87171; font-weight: 600;",
-                "Medium risk": "color: #FBBF24; font-weight: 600;",
-                "Low risk": "color: #34D399; font-weight: 600;"
-            }
-            return colors.get(value, "")
-
-        try:
-            styled_table = (
-                ranked_table.style
-                .format({"RiskScore": "{:.0f}%"})
-                .map(color_risk_level, subset=["RiskLevel"])
-            )
-        except AttributeError:
-            # Older pandas versions use .applymap() instead of .map()
-            # on a Styler object - fall back to that if .map() isn't
-            # available in this environment.
-            styled_table = (
-                ranked_table.style
-                .format({"RiskScore": "{:.0f}%"})
-                .applymap(color_risk_level, subset=["RiskLevel"])
+            st.dataframe(
+                details_table, use_container_width=True, hide_index=True
             )
 
-        st.dataframe(
-            styled_table,
-            use_container_width=True,
-            hide_index=True
-        )
+            if not pattern_df.empty:
+
+                st.write("**Top factors for this employee:**")
+
+                top_pattern_features = pattern_df["Feature"].head(3).tolist()
+
+                for feature in top_pattern_features:
+
+                    if feature in employee_row.index:
+
+                        employee_value = employee_row[feature]
+                        feature_pattern = pattern_df[
+                            pattern_df["Feature"] == feature
+                        ].iloc[0]
+
+                        stayed_avg = feature_pattern["Stayed average"]
+                        left_avg = feature_pattern["Left average"]
+
+                        closer_to_left = (
+                            abs(employee_value - left_avg)
+                            < abs(employee_value - stayed_avg)
+                        )
+
+                        direction = (
+                            "closer to the pattern seen in employees "
+                            "who left"
+                            if closer_to_left
+                            else "closer to the pattern seen in "
+                            "employees who stayed"
+                        )
+
+                        st.write(
+                            f"- **{feature}**: this employee's value is "
+                            f"**{employee_value:.1f}** ({direction}). "
+                            f"Average for employees who left: "
+                            f"{left_avg:.1f}, average for employees who "
+                            f"stayed: {stayed_avg:.1f}."
+                        )
+
+        # ----------------------------------------------------
+        # TAB: FULL RANKING
+        # ----------------------------------------------------
+
+        with ranking_tab:
+
+            st.subheader("All employees ranked by risk")
+
+            ranked_columns = [id_column, "RiskScore", "RiskLevel"]
+
+            if department_column and department_column in results_df.columns:
+                ranked_columns.insert(1, department_column)
+
+            ranked_table = results_df[ranked_columns].sort_values(
+                "RiskScore", ascending=False
+            )
+
+            def color_risk_level(value):
+                colors = {
+                    "High risk": "color: #F87171; font-weight: 600;",
+                    "Medium risk": "color: #FBBF24; font-weight: 600;",
+                    "Low risk": "color: #34D399; font-weight: 600;"
+                }
+                return colors.get(value, "")
+
+            try:
+                styled_table = (
+                    ranked_table.style
+                    .format({"RiskScore": "{:.0f}%"})
+                    .map(color_risk_level, subset=["RiskLevel"])
+                )
+            except AttributeError:
+                # Older pandas versions use .applymap() instead of
+                # .map() on a Styler object - fall back to that if
+                # .map() isn't available in this environment.
+                styled_table = (
+                    ranked_table.style
+                    .format({"RiskScore": "{:.0f}%"})
+                    .applymap(color_risk_level, subset=["RiskLevel"])
+                )
+
+            st.dataframe(
+                styled_table,
+                use_container_width=True,
+                hide_index=True
+            )
 
 
 # ------------------------------------------------------------
