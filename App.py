@@ -1454,10 +1454,24 @@ elif page == "Employee Lookup":
             }
             return colors.get(value, "")
 
-        st.dataframe(
-            ranked_table.style
+        try:
+            styled_table = (
+                ranked_table.style
                 .format({"RiskScore": "{:.0f}%"})
-                .applymap(color_risk_level, subset=["RiskLevel"]),
+                .map(color_risk_level, subset=["RiskLevel"])
+            )
+        except AttributeError:
+            # Older pandas versions use .applymap() instead of .map()
+            # on a Styler object - fall back to that if .map() isn't
+            # available in this environment.
+            styled_table = (
+                ranked_table.style
+                .format({"RiskScore": "{:.0f}%"})
+                .applymap(color_risk_level, subset=["RiskLevel"])
+            )
+
+        st.dataframe(
+            styled_table,
             use_container_width=True,
             hide_index=True
         )
