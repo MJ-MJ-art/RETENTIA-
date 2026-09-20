@@ -204,6 +204,13 @@ if "user" not in st.session_state:
 if "analyzed" not in st.session_state:
     st.session_state.analyzed = False
 
+if "preferences" not in st.session_state:
+    st.session_state.preferences = {
+        "company_name": "",
+        "high_risk_threshold": 66,
+        "medium_risk_threshold": 33
+    }
+
 
 def load_saved_results(user_id):
     """
@@ -275,6 +282,129 @@ def save_results_to_db(user_id):
         st.warning(f"Could not save your results to your account: {error}")
 
 
+def load_preferences(user_id):
+    """
+    Loads this user's saved preferences (company name, risk
+    thresholds). Falls back to sensible defaults if none are saved
+    yet - this is normal for a brand new account.
+    """
+
+    defaults = {
+        "company_name": "",
+        "high_risk_threshold": 66,
+        "medium_risk_threshold": 33
+    }
+
+    try:
+        response = (
+            supabase.table("user_preferences")
+            .select("*")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+
+        if response.data:
+            row = response.data[0]
+            st.session_state.preferences = {
+                "company_name": row.get("company_name") or "",
+                "high_risk_threshold": row.get("high_risk_threshold", 66),
+                "medium_risk_threshold": row.get(
+                    "medium_risk_threshold", 33
+                )
+            }
+        else:
+            st.session_state.preferences = defaults
+
+    except Exception:
+        st.session_state.preferences = defaults
+
+
+def save_preferences(user_id, company_name, high_threshold, medium_threshold):
+    """
+    Saves (or updates) this user's preferences in Supabase using
+    upsert - insert if it's their first time, update otherwise.
+    """
+
+    try:
+        supabase.table("user_preferences").upsert({
+            "user_id": user_id,
+            "company_name": company_name,
+            "high_risk_threshold": high_threshold,
+            "medium_risk_threshold": medium_threshold
+        }).execute()
+
+        st.session_state.preferences = {
+            "company_name": company_name,
+            "high_risk_threshold": high_threshold,
+            "medium_risk_threshold": medium_threshold
+        }
+
+        return True
+
+    except Exception as error:
+        st.warning(f"Could not save preferences: {error}")
+        return False
+
+
+def load_analysis_history(user_id):
+    """
+    Loads a lightweight summary of every past analysis for this
+    user (not the full data - just enough to list them), most
+    recent first.
+    """
+
+    try:
+        response = (
+            supabase.table("retentia_results")
+            .select("id, created_at, results_json")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+
+        return response.data or []
+
+    except Exception:
+        return []
+
+
+def load_specific_analysis(row_id):
+    """
+    Loads one specific past analysis (by its database row id) into
+    session state, so the user can revisit an older upload instead
+    of only ever seeing the latest one.
+    """
+
+    try:
+        response = (
+            supabase.table("retentia_results")
+            .select("*")
+            .eq("id", row_id)
+            .limit(1)
+            .execute()
+        )
+
+        if response.data:
+            row = response.data[0]
+
+            st.session_state.results_df = pd.DataFrame(row["results_json"])
+            st.session_state.pattern_df = pd.DataFrame(row["pattern_json"])
+            st.session_state.id_column = row["id_column"]
+            st.session_state.department_column = row["department_column"]
+            st.session_state.target_column = row["target_column"]
+            st.session_state.data_columns = row["data_columns"]
+            st.session_state.analyzed = True
+
+            return True
+
+        return False
+
+    except Exception as error:
+        st.warning(f"Could not load that analysis: {error}")
+        return False
+
+
 # ------------------------------------------------------------
 # LOGIN / SIGN UP GATE
 # ------------------------------------------------------------
@@ -313,6 +443,7 @@ if st.session_state.user is None:
 
                 st.session_state.user = res.user
                 load_saved_results(res.user.id)
+                load_preferences(res.user.id)
                 st.rerun()
 
             except Exception as error:
@@ -351,11 +482,16 @@ st.sidebar.markdown(
     unsafe_allow_html=True
 )
 
+company_name = st.session_state.preferences.get("company_name", "")
+
+if company_name:
+    st.sidebar.caption(f"{company_name}")
+
 st.sidebar.caption(f"Logged in as {st.session_state.user.email}")
 
 page = st.sidebar.radio(
     "Navigate",
-    ["Home", "Analyze", "Employee Lookup", "About"],
+    ["Home", "Analyze", "Employee Lookup", "History", "Settings", "About"],
     label_visibility="collapsed"
 )
 
@@ -1144,10 +1280,17 @@ employee feedback, organizational context, and other evidence.
     results_df = data.copy()
     results_df["RiskScore"] = all_risk_scores * 100
 
+    high_threshold = st.session_state.preferences.get(
+        "high_risk_threshold", 66
+    )
+    medium_threshold = st.session_state.preferences.get(
+        "medium_risk_threshold", 33
+    )
+
     def risk_label(score):
-        if score >= 66:
+        if score >= high_threshold:
             return "High risk"
-        elif score >= 33:
+        elif score >= medium_threshold:
             return "Medium risk"
         else:
             return "Low risk"
@@ -1318,6 +1461,138 @@ elif page == "Employee Lookup":
             use_container_width=True,
             hide_index=True
         )
+
+
+# ------------------------------------------------------------
+# PAGE: HISTORY
+# ------------------------------------------------------------
+
+elif page == "History":
+
+    st.markdown(
+        '<div class="section-title">Your analysis history</div>',
+        unsafe_allow_html=True
+    )
+
+    st.caption(
+        "Every dataset you've analyzed is saved here, most recent "
+        "first. Load any past analysis to explore it again on the "
+        "Employee Lookup page."
+    )
+
+    history = load_analysis_history(st.session_state.user.id)
+
+    if not history:
+
+        st.info(
+            "No past analyses yet. Go to the Analyze page to upload "
+            "your first dataset."
+        )
+
+    else:
+
+        for entry in history:
+
+            employee_count = len(entry.get("results_json") or [])
+            created_at = entry.get("created_at", "Unknown date")
+
+            with st.container():
+
+                col1, col2, col3 = st.columns([3, 2, 1])
+
+                with col1:
+                    st.write(f"**{created_at}**")
+
+                with col2:
+                    st.write(f"{employee_count} employees")
+
+                with col3:
+                    if st.button("Load", key=f"load_{entry['id']}"):
+                        if load_specific_analysis(entry["id"]):
+                            st.success(
+                                "Loaded. Go to Employee Lookup to "
+                                "explore it."
+                            )
+                            st.rerun()
+
+                st.markdown("---")
+
+
+# ------------------------------------------------------------
+# PAGE: SETTINGS
+# ------------------------------------------------------------
+
+elif page == "Settings":
+
+    st.markdown(
+        '<div class="section-title">Settings</div>',
+        unsafe_allow_html=True
+    )
+
+    st.caption(
+        "These preferences are saved to your account and applied "
+        "every time you analyze new data."
+    )
+
+    current_company = st.session_state.preferences.get("company_name", "")
+    current_high = st.session_state.preferences.get(
+        "high_risk_threshold", 66
+    )
+    current_medium = st.session_state.preferences.get(
+        "medium_risk_threshold", 33
+    )
+
+    company_name_input = st.text_input(
+        "Company or display name",
+        value=current_company,
+        help="Shown in the sidebar throughout the app."
+    )
+
+    st.write("**Risk thresholds**")
+
+    st.caption(
+        "Employees at or above the high threshold are labeled "
+        "\"High risk.\" Below that but at or above the medium "
+        "threshold, they're \"Medium risk.\" Below the medium "
+        "threshold, they're \"Low risk.\""
+    )
+
+    medium_threshold_input = st.slider(
+        "Medium risk threshold (%)",
+        min_value=0,
+        max_value=100,
+        value=int(current_medium)
+    )
+
+    high_threshold_input = st.slider(
+        "High risk threshold (%)",
+        min_value=0,
+        max_value=100,
+        value=int(current_high)
+    )
+
+    if high_threshold_input <= medium_threshold_input:
+
+        st.warning(
+            "The high risk threshold should be greater than the "
+            "medium risk threshold, or the labels won't make sense."
+        )
+
+    if st.button("Save settings"):
+
+        saved = save_preferences(
+            st.session_state.user.id,
+            company_name_input,
+            high_threshold_input,
+            medium_threshold_input
+        )
+
+        if saved:
+            st.success(
+                "Settings saved. These will apply the next time you "
+                "analyze data."
+            )
+            st.rerun()
 
 
 # ------------------------------------------------------------
