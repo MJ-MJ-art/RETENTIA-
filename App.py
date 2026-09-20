@@ -24,6 +24,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import time
 
 from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
@@ -193,6 +194,42 @@ if "preferences" not in st.session_state:
         "high_risk_threshold": 66,
         "medium_risk_threshold": 33
     }
+
+if "splash_seen" not in st.session_state:
+    st.session_state.splash_seen = False
+
+# ------------------------------------------------------------
+# SPLASH SCREEN
+# ------------------------------------------------------------
+# Shown once per browser session, before the login screen or
+# anything else - just the logo, briefly, the way most apps open.
+
+if not st.session_state.splash_seen:
+
+    st.markdown(
+        """
+        <style>
+            .splash-wrap {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 70vh;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    splash_left, splash_center, splash_right = st.columns([1, 1, 1])
+
+    with splash_center:
+        st.markdown('<div class="splash-wrap">', unsafe_allow_html=True)
+        st.image("logo.png", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    time.sleep(1.4)
+    st.session_state.splash_seen = True
+    st.rerun()
 
 
 def load_saved_results(user_id):
