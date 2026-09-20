@@ -2,16 +2,15 @@
 # RETENTIA
 # Employee Attrition Analytics Dashboard
 #
-# This version is designed for HR analytics and decision support.
-# It avoids ranking individual employees for management action.
-# Instead, it provides:
-#   - Data cleaning
-#   - Decision-tree attrition model
-#   - Model performance
-#   - Feature importance
-#   - Aggregate risk patterns
-#   - Plain-English findings
-#   - Management recommendations
+# Multi-page version. Pages:
+#   - Home            : welcome / what Retentia does
+#   - Analyze         : upload data, cleaning, model, patterns, findings
+#   - Employee Lookup : search a specific employee + full ranked table
+#   - About           : what Retentia is, its limits, and who built it
+#
+# Data and results from the Analyze page are kept in st.session_state
+# so they are still available when the user switches to the
+# Employee Lookup page, without needing to re-upload.
 # ============================================================
 
 import streamlit as st
@@ -73,7 +72,7 @@ st.markdown(
 )
 
 # ------------------------------------------------------------
-# HEADER
+# HEADER (shown on every page)
 # ------------------------------------------------------------
 
 st.markdown(
@@ -89,29 +88,36 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.info(
-    "Retentia is designed as an HR analytics and decision-support tool. "
-    "Predictions are presented at an aggregate level and should not be "
-    "used to make employment decisions about individual employees."
-)
+# ------------------------------------------------------------
+# SESSION STATE
+# ------------------------------------------------------------
+# This is what lets the app "remember" the analysis when the user
+# moves from the Analyze page to the Employee Lookup page, within
+# the same browser session. It does NOT persist after the browser
+# tab is closed or the app is reloaded from scratch.
+
+if "analyzed" not in st.session_state:
+    st.session_state.analyzed = False
 
 # ------------------------------------------------------------
-# SIDEBAR
+# SIDEBAR NAVIGATION
 # ------------------------------------------------------------
 
-st.sidebar.header("Upload employee data")
+st.sidebar.title("Retentia")
 
-uploaded_file = st.sidebar.file_uploader(
-    "Upload a CSV file",
-    type=["csv"]
+page = st.sidebar.radio(
+    "Navigate",
+    ["Home", "Analyze", "Employee Lookup", "About"]
 )
 
 st.sidebar.markdown("---")
 
-st.sidebar.caption(
-    "For testing, you can generate a synthetic dataset using "
-    "`generate_data.py`."
-)
+if st.session_state.analyzed:
+    st.sidebar.success("Data loaded and analyzed.")
+else:
+    st.sidebar.caption(
+        "No data analyzed yet. Go to the Analyze page to upload a CSV."
+    )
 
 # ------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -437,16 +443,17 @@ def get_feature_importance(pipeline):
 
 
 # ------------------------------------------------------------
-# MAIN APPLICATION
+# PAGE: HOME
 # ------------------------------------------------------------
 
-if uploaded_file is None:
+if page == "Home":
 
     st.markdown(
         '<div class="info-box">'
         '<strong>Welcome to Retentia.</strong><br><br>'
-        'Upload an employee CSV from the sidebar to begin analyzing '
-        'attrition patterns.'
+        'Retentia helps organizations understand why employees leave, '
+        'using their own workforce data — no manual spreadsheet '
+        'digging required.'
         '</div>',
         unsafe_allow_html=True
     )
@@ -457,14 +464,26 @@ if uploaded_file is None:
 
     with col1:
         st.metric("1", "Clean data")
+        st.caption("Upload a CSV and Retentia automatically cleans it.")
 
     with col2:
-        st.metric("2", "Train model")
+        st.metric("2", "Train a model")
+        st.caption("A decision-tree model learns what predicts attrition.")
 
     with col3:
         st.metric("3", "Understand patterns")
+        st.caption("See what drives risk, company-wide and per employee.")
 
     st.markdown("---")
+
+    st.subheader("Getting started")
+
+    st.write(
+        "Go to the **Analyze** page from the sidebar to upload your "
+        "employee data. Once analyzed, you can explore individual "
+        "employees on the **Employee Lookup** page at any time, "
+        "without re-uploading."
+    )
 
     st.subheader("Expected data")
 
@@ -474,634 +493,332 @@ if uploaded_file is None:
         "performance, promotion history, attendance, or similar fields."
     )
 
-    st.stop()
-
 
 # ------------------------------------------------------------
-# LOAD DATA
+# PAGE: ANALYZE
 # ------------------------------------------------------------
 
-try:
+elif page == "Analyze":
 
-    raw_data = pd.read_csv(uploaded_file)
-
-except Exception as error:
-
-    st.error(
-        f"Could not read the CSV file: {error}"
+    st.markdown(
+        '<div class="section-title">Analyze employee data</div>',
+        unsafe_allow_html=True
     )
 
-    st.stop()
-
-
-# ------------------------------------------------------------
-# CLEAN DATA
-# ------------------------------------------------------------
-
-(
-    data,
-    original_rows,
-    original_columns,
-    duplicate_count,
-    empty_columns
-) = clean_dataset(raw_data)
-
-
-# ------------------------------------------------------------
-# FIND TARGET
-# ------------------------------------------------------------
-
-target_column, target = prepare_target(data)
-
-if target_column is None:
-
-    st.error(
-        "I could not find an attrition target column. "
-        "Please include a column such as Attrition, Left, "
-        "EmployeeAttrition, Exited, or Turnover."
+    st.info(
+        "Retentia is designed as an HR analytics and decision-support "
+        "tool. Predictions are presented at an aggregate level and "
+        "should not be used to make employment decisions about "
+        "individual employees."
     )
 
-    st.stop()
-
-
-data[target_column] = target
-
-# Remove rows where target cannot be determined
-before_target_cleanup = len(data)
-
-data = data.dropna(
-    subset=[target_column]
-)
-
-target_rows_removed = (
-    before_target_cleanup - len(data)
-)
-
-
-# Make sure target is binary
-unique_target_values = set(
-    data[target_column].unique()
-)
-
-if not unique_target_values.issubset({0, 1}):
-
-    st.error(
-        "The attrition column must represent two classes, "
-        "such as Yes/No or 1/0."
+    uploaded_file = st.file_uploader(
+        "Upload a CSV file",
+        type=["csv"]
     )
 
-    st.stop()
-
-
-# ------------------------------------------------------------
-# DATA SUMMARY
-# ------------------------------------------------------------
-
-st.markdown(
-    '<div class="section-title">Data overview</div>',
-    unsafe_allow_html=True
-)
-
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    st.metric(
-        "Employees",
-        len(data)
+    st.caption(
+        "For testing, you can generate a synthetic dataset using "
+        "`generate_data.py`."
     )
 
-with col2:
-    st.metric(
-        "Features",
-        len(data.columns) - 1
-    )
-
-with col3:
-    attrition_rate = data[target_column].mean() * 100
-
-    st.metric(
-        "Observed attrition",
-        f"{attrition_rate:.1f}%"
-    )
-
-with col4:
-    st.metric(
-        "Duplicate rows removed",
-        duplicate_count
-    )
-
-
-# ------------------------------------------------------------
-# CLEANING SUMMARY
-# ------------------------------------------------------------
-
-with st.expander(
-    "View cleaning summary"
-):
-
-    st.write(
-        f"Original dataset: **{original_rows} rows × "
-        f"{original_columns} columns**."
-    )
-
-    st.write(
-        f"Final dataset: **{len(data)} rows × "
-        f"{len(data.columns)} columns**."
-    )
-
-    st.write(
-        f"Duplicate rows removed: **{duplicate_count}**."
-    )
-
-    st.write(
-        f"Rows with missing target values removed: "
-        f"**{target_rows_removed}**."
-    )
-
-    if empty_columns:
+    if uploaded_file is None:
 
         st.write(
-            "Completely empty columns removed: "
-            + ", ".join(map(str, empty_columns))
+            "Upload a CSV above to run the analysis. Results will also "
+            "become available on the Employee Lookup page once this "
+            "finishes."
         )
 
-    else:
+        st.stop()
+
+    # --------------------------------------------------------
+    # LOAD DATA
+    # --------------------------------------------------------
+
+    try:
+        raw_data = pd.read_csv(uploaded_file)
+    except Exception as error:
+        st.error(f"Could not read the CSV file: {error}")
+        st.stop()
+
+    # --------------------------------------------------------
+    # CLEAN DATA
+    # --------------------------------------------------------
+
+    (
+        data,
+        original_rows,
+        original_columns,
+        duplicate_count,
+        empty_columns
+    ) = clean_dataset(raw_data)
+
+    # --------------------------------------------------------
+    # FIND TARGET
+    # --------------------------------------------------------
+
+    target_column, target = prepare_target(data)
+
+    if target_column is None:
+        st.error(
+            "I could not find an attrition target column. "
+            "Please include a column such as Attrition, Left, "
+            "EmployeeAttrition, Exited, or Turnover."
+        )
+        st.stop()
+
+    data[target_column] = target
+
+    before_target_cleanup = len(data)
+    data = data.dropna(subset=[target_column])
+    target_rows_removed = before_target_cleanup - len(data)
+
+    unique_target_values = set(data[target_column].unique())
+
+    if not unique_target_values.issubset({0, 1}):
+        st.error(
+            "The attrition column must represent two classes, "
+            "such as Yes/No or 1/0."
+        )
+        st.stop()
+
+    # --------------------------------------------------------
+    # DATA SUMMARY
+    # --------------------------------------------------------
+
+    st.markdown(
+        '<div class="section-title">Data overview</div>',
+        unsafe_allow_html=True
+    )
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Employees", len(data))
+
+    with col2:
+        st.metric("Features", len(data.columns) - 1)
+
+    with col3:
+        attrition_rate = data[target_column].mean() * 100
+        st.metric("Observed attrition", f"{attrition_rate:.1f}%")
+
+    with col4:
+        st.metric("Duplicate rows removed", duplicate_count)
+
+    with st.expander("View cleaning summary"):
 
         st.write(
-            "No completely empty columns were found."
+            f"Original dataset: **{original_rows} rows × "
+            f"{original_columns} columns**."
+        )
+        st.write(
+            f"Final dataset: **{len(data)} rows × "
+            f"{len(data.columns)} columns**."
+        )
+        st.write(f"Duplicate rows removed: **{duplicate_count}**.")
+        st.write(
+            f"Rows with missing target values removed: "
+            f"**{target_rows_removed}**."
         )
 
-    st.write(
-        "Missing values in predictor columns are handled "
-        "automatically during model training using median "
-        "imputation for numeric variables and most-frequent "
-        "imputation for categorical variables."
-    )
-
-
-# ------------------------------------------------------------
-# PREPARE MODEL DATA
-# ------------------------------------------------------------
-
-X, dropped_columns = build_model_data(
-    data,
-    target_column
-)
-
-y = data[target_column]
-
-
-if len(X) < 30:
-
-    st.warning(
-        "The dataset is quite small. Model metrics may be unstable. "
-        "For a realistic test, use several hundred synthetic records "
-        "or more."
-    )
-
-
-# ------------------------------------------------------------
-# TRAIN / TEST SPLIT
-# ------------------------------------------------------------
-
-try:
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.25,
-        random_state=42,
-        stratify=y
-    )
-
-except ValueError:
-
-    st.error(
-        "The dataset does not contain enough examples of both "
-        "attrition classes for a stratified train/test split."
-    )
-
-    st.stop()
-
-
-# ------------------------------------------------------------
-# TRAIN MODEL
-# ------------------------------------------------------------
-
-pipeline = make_pipeline(X)
-
-pipeline.fit(
-    X_train,
-    y_train
-)
-
-
-# ------------------------------------------------------------
-# MODEL EVALUATION
-# ------------------------------------------------------------
-
-predictions = pipeline.predict(X_test)
-
-accuracy = accuracy_score(
-    y_test,
-    predictions
-)
-
-precision = precision_score(
-    y_test,
-    predictions,
-    zero_division=0
-)
-
-recall = recall_score(
-    y_test,
-    predictions,
-    zero_division=0
-)
-
-
-st.markdown(
-    '<div class="section-title">Model performance</div>',
-    unsafe_allow_html=True
-)
-
-st.caption(
-    "These metrics describe performance on the held-out test data. "
-    "They should not be interpreted as proof that the model will "
-    "perform identically on future employees."
-)
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.metric(
-        "Accuracy",
-        f"{accuracy:.1%}"
-    )
-
-with col2:
-    st.metric(
-        "Precision",
-        f"{precision:.1%}"
-    )
-
-with col3:
-    st.metric(
-        "Recall",
-        f"{recall:.1%}"
-    )
-
-
-# ------------------------------------------------------------
-# FEATURE IMPORTANCE
-# ------------------------------------------------------------
-
-st.markdown(
-    '<div class="section-title">What drives the model?</div>',
-    unsafe_allow_html=True
-)
-
-importance_df = get_feature_importance(
-    pipeline
-)
-
-top_features = importance_df.head(10).copy()
-
-top_features = top_features.sort_values(
-    "Importance",
-    ascending=True
-)
-
-st.bar_chart(
-    top_features.set_index("Feature")["Importance"]
-)
-
-st.caption(
-    "Feature importance indicates which variables the decision tree "
-    "used most strongly. It does not prove that a factor causes "
-    "employees to leave."
-)
-
-
-# ------------------------------------------------------------
-# AGGREGATE ATTRITION ANALYSIS
-# ------------------------------------------------------------
-
-st.markdown(
-    '<div class="section-title">Attrition patterns</div>',
-    unsafe_allow_html=True
-)
-
-
-# Find useful grouping columns
-department_column = find_column(
-    data,
-    [
-        "Department",
-        "BusinessUnit",
-        "JobRole"
-    ]
-)
-
-if department_column:
-
-    department_summary = (
-        data.groupby(department_column)[target_column]
-        .agg(
-            Employees="count",
-            Attrition_Rate="mean"
-        )
-        .reset_index()
-    )
-
-    department_summary["Attrition_Rate"] *= 100
-
-    department_summary = department_summary.sort_values(
-        "Attrition_Rate",
-        ascending=False
-    )
-
-    st.subheader(
-        f"Attrition by {department_column}"
-    )
-
-    st.dataframe(
-        department_summary.style.format({
-            "Attrition_Rate": "{:.1f}%"
-        }),
-        use_container_width=True,
-        hide_index=True
-    )
-
-else:
-
-    st.write(
-        "No department or comparable grouping column was found."
-    )
-
-
-# ------------------------------------------------------------
-# NUMERIC ATTRITION PATTERNS
-# ------------------------------------------------------------
-
-numeric_columns = data.select_dtypes(
-    include=["number"]
-).columns.tolist()
-
-numeric_columns = [
-    column
-    for column in numeric_columns
-    if column != target_column
-]
-
-
-if numeric_columns:
-
-    pattern_rows = []
-
-    for column in numeric_columns:
-
-        stayed_values = data.loc[
-            data[target_column] == 0,
-            column
-        ].dropna()
-
-        left_values = data.loc[
-            data[target_column] == 1,
-            column
-        ].dropna()
-
-        if len(stayed_values) > 0 and len(left_values) > 0:
-
-            pattern_rows.append({
-                "Feature": column,
-                "Stayed average": stayed_values.mean(),
-                "Left average": left_values.mean(),
-                "Difference": (
-                    left_values.mean()
-                    - stayed_values.mean()
-                )
-            })
-
-    if pattern_rows:
-
-        pattern_df = pd.DataFrame(
-            pattern_rows
-        )
-
-        pattern_df["Absolute Difference"] = (
-            pattern_df["Difference"].abs()
-        )
-
-        pattern_df = (
-            pattern_df
-            .sort_values(
-                "Absolute Difference",
-                ascending=False
+        if empty_columns:
+            st.write(
+                "Completely empty columns removed: "
+                + ", ".join(map(str, empty_columns))
             )
-            .drop(
-                columns=["Absolute Difference"]
-            )
-            .head(10)
+        else:
+            st.write("No completely empty columns were found.")
+
+        st.write(
+            "Missing values in predictor columns are handled "
+            "automatically during model training using median "
+            "imputation for numeric variables and most-frequent "
+            "imputation for categorical variables."
         )
 
-        st.subheader(
-            "Largest numeric differences between groups"
+    # --------------------------------------------------------
+    # PREPARE MODEL DATA
+    # --------------------------------------------------------
+
+    X, dropped_columns = build_model_data(data, target_column)
+    y = data[target_column]
+
+    if len(X) < 30:
+        st.warning(
+            "The dataset is quite small. Model metrics may be unstable. "
+            "For a realistic test, use several hundred synthetic "
+            "records or more."
         )
+
+    # --------------------------------------------------------
+    # TRAIN / TEST SPLIT
+    # --------------------------------------------------------
+
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.25, random_state=42, stratify=y
+        )
+    except ValueError:
+        st.error(
+            "The dataset does not contain enough examples of both "
+            "attrition classes for a stratified train/test split."
+        )
+        st.stop()
+
+    # --------------------------------------------------------
+    # TRAIN MODEL
+    # --------------------------------------------------------
+
+    pipeline = make_pipeline(X)
+    pipeline.fit(X_train, y_train)
+
+    # --------------------------------------------------------
+    # MODEL EVALUATION
+    # --------------------------------------------------------
+
+    predictions = pipeline.predict(X_test)
+    accuracy = accuracy_score(y_test, predictions)
+    precision = precision_score(y_test, predictions, zero_division=0)
+    recall = recall_score(y_test, predictions, zero_division=0)
+
+    st.markdown(
+        '<div class="section-title">Model performance</div>',
+        unsafe_allow_html=True
+    )
+
+    st.caption(
+        "These metrics describe performance on the held-out test data. "
+        "They should not be interpreted as proof that the model will "
+        "perform identically on future employees."
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Accuracy", f"{accuracy:.1%}")
+    with col2:
+        st.metric("Precision", f"{precision:.1%}")
+    with col3:
+        st.metric("Recall", f"{recall:.1%}")
+
+    # --------------------------------------------------------
+    # FEATURE IMPORTANCE
+    # --------------------------------------------------------
+
+    st.markdown(
+        '<div class="section-title">What drives the model?</div>',
+        unsafe_allow_html=True
+    )
+
+    importance_df = get_feature_importance(pipeline)
+
+    top_features = importance_df.head(10).copy()
+    top_features = top_features.sort_values("Importance", ascending=True)
+
+    st.bar_chart(top_features.set_index("Feature")["Importance"])
+
+    st.caption(
+        "Feature importance indicates which variables the decision tree "
+        "used most strongly. It does not prove that a factor causes "
+        "employees to leave."
+    )
+
+    # --------------------------------------------------------
+    # AGGREGATE ATTRITION ANALYSIS
+    # --------------------------------------------------------
+
+    st.markdown(
+        '<div class="section-title">Attrition patterns</div>',
+        unsafe_allow_html=True
+    )
+
+    department_column = find_column(
+        data, ["Department", "BusinessUnit", "JobRole"]
+    )
+
+    if department_column:
+
+        department_summary = (
+            data.groupby(department_column)[target_column]
+            .agg(Employees="count", Attrition_Rate="mean")
+            .reset_index()
+        )
+        department_summary["Attrition_Rate"] *= 100
+        department_summary = department_summary.sort_values(
+            "Attrition_Rate", ascending=False
+        )
+
+        st.subheader(f"Attrition by {department_column}")
 
         st.dataframe(
-            pattern_df,
+            department_summary.style.format({"Attrition_Rate": "{:.1f}%"}),
             use_container_width=True,
             hide_index=True
         )
 
-
-# ------------------------------------------------------------
-# INDIVIDUAL EMPLOYEE RISK SCORES
-# ------------------------------------------------------------
-
-st.markdown(
-    '<div class="section-title">Employee risk scores</div>',
-    unsafe_allow_html=True
-)
-
-# Predict a risk score for every employee in the uploaded dataset,
-# not just the held-out test set used to measure accuracy.
-all_risk_scores = pipeline.predict_proba(X)[:, 1]
-
-results_df = data.copy()
-results_df["RiskScore"] = all_risk_scores * 100
-
-
-def risk_label(score):
-    if score >= 66:
-        return "High risk"
-    elif score >= 33:
-        return "Medium risk"
     else:
-        return "Low risk"
+        st.write("No department or comparable grouping column was found.")
 
+    # --------------------------------------------------------
+    # NUMERIC ATTRITION PATTERNS
+    # --------------------------------------------------------
 
-results_df["RiskLevel"] = results_df["RiskScore"].apply(risk_label)
+    numeric_columns = data.select_dtypes(include=["number"]).columns.tolist()
+    numeric_columns = [c for c in numeric_columns if c != target_column]
 
-# Try to find an identifier column to show in the lookup and table.
-# If none exists, fall back to a simple row number so lookup still works.
-id_column = find_column(
-    data,
-    ["EmployeeID", "EmployeeNumber", "ID", "Employee Id"]
-)
+    pattern_df = pd.DataFrame(columns=["Feature", "Stayed average", "Left average", "Difference"])
 
-if id_column is None:
-    results_df["RowNumber"] = range(1, len(results_df) + 1)
-    id_column = "RowNumber"
+    if numeric_columns:
 
-st.caption(
-    "Risk scores are calculated for every employee in the uploaded "
-    "dataset using the trained model. Scores reflect patterns found "
-    "in this dataset and should be reviewed alongside other evidence, "
-    "not used as the sole basis for decisions about individual "
-    "employees."
-)
+        pattern_rows = []
 
+        for column in numeric_columns:
 
-# ------------------------------------------------------------
-# LOOK UP AN EMPLOYEE
-# ------------------------------------------------------------
+            stayed_values = data.loc[data[target_column] == 0, column].dropna()
+            left_values = data.loc[data[target_column] == 1, column].dropna()
 
-st.subheader("Look up an employee")
+            if len(stayed_values) > 0 and len(left_values) > 0:
+                pattern_rows.append({
+                    "Feature": column,
+                    "Stayed average": stayed_values.mean(),
+                    "Left average": left_values.mean(),
+                    "Difference": left_values.mean() - stayed_values.mean()
+                })
 
-selected_id = st.selectbox(
-    "Select an employee",
-    options=results_df[id_column].astype(str).tolist()
-)
+        if pattern_rows:
 
-employee_row = results_df[
-    results_df[id_column].astype(str) == selected_id
-].iloc[0]
+            pattern_df = pd.DataFrame(pattern_rows)
+            pattern_df["Absolute Difference"] = pattern_df["Difference"].abs()
+            pattern_df = (
+                pattern_df
+                .sort_values("Absolute Difference", ascending=False)
+                .drop(columns=["Absolute Difference"])
+                .head(10)
+            )
 
-lookup_col1, lookup_col2 = st.columns(2)
+            st.subheader("Largest numeric differences between groups")
 
-with lookup_col1:
-    st.metric(
-        "Risk score",
-        f"{employee_row['RiskScore']:.0f}%"
+            st.dataframe(
+                pattern_df,
+                use_container_width=True,
+                hide_index=True
+            )
+
+    # --------------------------------------------------------
+    # OVERALL FINDINGS
+    # --------------------------------------------------------
+
+    st.markdown(
+        '<div class="section-title">Overall findings</div>',
+        unsafe_allow_html=True
     )
 
-with lookup_col2:
-    st.metric(
-        "Risk level",
-        employee_row["RiskLevel"]
-    )
+    top_feature_names = importance_df.head(3)["Feature"].tolist()
+    feature_text = ", ".join(top_feature_names)
 
-# Show key employee details (excluding the target and id columns)
-detail_columns = [
-    column for column in data.columns
-    if column not in [target_column, id_column]
-][:10]
-
-st.write("**Employee details:**")
-
-details_table = pd.DataFrame({
-    "Attribute": detail_columns,
-    "Value": [employee_row[column] for column in detail_columns]
-})
-
-st.dataframe(
-    details_table,
-    use_container_width=True,
-    hide_index=True
-)
-
-# Show the top contributing factors for this employee, based on the
-# numeric features with the largest overall difference between
-# employees who stayed and employees who left (computed above in
-# the "Largest numeric differences between groups" section).
-if numeric_columns and "pattern_df" in dir():
-
-    st.write("**Top factors for this employee:**")
-
-    top_pattern_features = pattern_df["Feature"].head(3).tolist()
-
-    for feature in top_pattern_features:
-
-        if feature in employee_row.index:
-
-            employee_value = employee_row[feature]
-
-            feature_pattern = pattern_df[
-                pattern_df["Feature"] == feature
-            ].iloc[0]
-
-            stayed_avg = feature_pattern["Stayed average"]
-            left_avg = feature_pattern["Left average"]
-
-            closer_to_left = (
-                abs(employee_value - left_avg)
-                < abs(employee_value - stayed_avg)
-            )
-
-            direction = (
-                "closer to the pattern seen in employees who left"
-                if closer_to_left
-                else "closer to the pattern seen in employees who stayed"
-            )
-
-            st.write(
-                f"- **{feature}**: this employee's value is "
-                f"**{employee_value:.1f}** ({direction}). "
-                f"Average for employees who left: {left_avg:.1f}, "
-                f"average for employees who stayed: {stayed_avg:.1f}."
-            )
-
-st.markdown("---")
-
-
-# ------------------------------------------------------------
-# ALL EMPLOYEES RANKED BY RISK
-# ------------------------------------------------------------
-
-st.subheader("All employees ranked by risk")
-
-ranked_columns = [id_column, "RiskScore", "RiskLevel"]
-
-if department_column and department_column in results_df.columns:
-    ranked_columns.insert(1, department_column)
-
-ranked_table = results_df[ranked_columns].sort_values(
-    "RiskScore",
-    ascending=False
-)
-
-st.dataframe(
-    ranked_table.style.format({"RiskScore": "{:.0f}%"}),
-    use_container_width=True,
-    hide_index=True
-)
-
-
-# ------------------------------------------------------------
-# OVERALL FINDINGS
-# ------------------------------------------------------------
-
-st.markdown(
-    '<div class="section-title">Overall findings</div>',
-    unsafe_allow_html=True
-)
-
-
-top_feature_names = (
-    importance_df
-    .head(3)["Feature"]
-    .tolist()
-)
-
-
-feature_text = ", ".join(
-    top_feature_names
-)
-
-
-findings_text = f"""
+    findings_text = f"""
 The uploaded dataset contains **{len(data)} employees**, with an observed
 attrition rate of **{attrition_rate:.1f}%**.
 
@@ -1118,59 +835,243 @@ attrition, and model predictions should be reviewed alongside
 employee feedback, organizational context, and other evidence.
 """
 
-st.write(
-    findings_text
-)
+    st.write(findings_text)
 
+    # --------------------------------------------------------
+    # RECOMMENDATIONS
+    # --------------------------------------------------------
 
-# ------------------------------------------------------------
-# RECOMMENDATIONS
-# ------------------------------------------------------------
+    st.subheader("Recommended management actions")
 
-st.subheader(
-    "Recommended management actions"
-)
+    recommendations = [
+        "Review the strongest aggregate attrition patterns and investigate the underlying workplace causes.",
+        "Use employee surveys, stay interviews, and manager feedback to validate the patterns identified by the model.",
+        "Review workload, overtime, career-development opportunities, compensation, and promotion processes where the data indicates potential retention concerns.",
+        "Develop targeted retention initiatives at the team or organizational level rather than treating model predictions as conclusions about individual employees.",
+        "Monitor attrition rates over time and retrain the model periodically as workforce conditions and organizational policies change."
+    ]
 
-recommendations = [
-    "Review the strongest aggregate attrition patterns and investigate the underlying workplace causes.",
-    "Use employee surveys, stay interviews, and manager feedback to validate the patterns identified by the model.",
-    "Review workload, overtime, career-development opportunities, compensation, and promotion processes where the data indicates potential retention concerns.",
-    "Develop targeted retention initiatives at the team or organizational level rather than treating model predictions as conclusions about individual employees.",
-    "Monitor attrition rates over time and retrain the model periodically as workforce conditions and organizational policies change."
-]
+    for number, recommendation in enumerate(recommendations, start=1):
+        st.write(f"**{number}.** {recommendation}")
 
-for number, recommendation in enumerate(
-    recommendations,
-    start=1
-):
+    # --------------------------------------------------------
+    # DATA PREVIEW
+    # --------------------------------------------------------
 
-    st.write(
-        f"**{number}.** {recommendation}"
+    st.markdown(
+        '<div class="section-title">Cleaned data preview</div>',
+        unsafe_allow_html=True
+    )
+
+    st.dataframe(data.head(20), use_container_width=True)
+
+    # --------------------------------------------------------
+    # COMPUTE + SAVE EMPLOYEE-LEVEL RESULTS FOR THE LOOKUP PAGE
+    # --------------------------------------------------------
+
+    all_risk_scores = pipeline.predict_proba(X)[:, 1]
+    results_df = data.copy()
+    results_df["RiskScore"] = all_risk_scores * 100
+
+    def risk_label(score):
+        if score >= 66:
+            return "High risk"
+        elif score >= 33:
+            return "Medium risk"
+        else:
+            return "Low risk"
+
+    results_df["RiskLevel"] = results_df["RiskScore"].apply(risk_label)
+
+    id_column = find_column(
+        data, ["EmployeeID", "EmployeeNumber", "ID", "Employee Id"]
+    )
+
+    if id_column is None:
+        results_df["RowNumber"] = range(1, len(results_df) + 1)
+        id_column = "RowNumber"
+
+    # Save everything the Employee Lookup page needs
+    st.session_state.analyzed = True
+    st.session_state.results_df = results_df
+    st.session_state.pattern_df = pattern_df
+    st.session_state.id_column = id_column
+    st.session_state.department_column = department_column
+    st.session_state.target_column = target_column
+    st.session_state.data_columns = list(data.columns)
+
+    st.success(
+        "Analysis complete. Go to the Employee Lookup page to explore "
+        "individual employees, or upload a new file above to re-analyze."
     )
 
 
 # ------------------------------------------------------------
-# DATA PREVIEW
+# PAGE: EMPLOYEE LOOKUP
 # ------------------------------------------------------------
 
-st.markdown(
-    '<div class="section-title">Cleaned data preview</div>',
-    unsafe_allow_html=True
-)
+elif page == "Employee Lookup":
 
-st.dataframe(
-    data.head(20),
-    use_container_width=True
-)
+    st.markdown(
+        '<div class="section-title">Employee risk scores</div>',
+        unsafe_allow_html=True
+    )
+
+    if not st.session_state.analyzed:
+
+        st.warning(
+            "No analyzed data yet. Go to the Analyze page and upload a "
+            "CSV first — results will then be available here."
+        )
+
+    else:
+
+        results_df = st.session_state.results_df
+        pattern_df = st.session_state.pattern_df
+        id_column = st.session_state.id_column
+        department_column = st.session_state.department_column
+        target_column = st.session_state.target_column
+
+        st.caption(
+            "Risk scores are calculated for every employee in the "
+            "uploaded dataset using the trained model. Scores reflect "
+            "patterns found in this dataset and should be reviewed "
+            "alongside other evidence, not used as the sole basis for "
+            "decisions about individual employees."
+        )
+
+        st.subheader("Look up an employee")
+
+        selected_id = st.selectbox(
+            "Select an employee",
+            options=results_df[id_column].astype(str).tolist()
+        )
+
+        employee_row = results_df[
+            results_df[id_column].astype(str) == selected_id
+        ].iloc[0]
+
+        lookup_col1, lookup_col2 = st.columns(2)
+
+        with lookup_col1:
+            st.metric("Risk score", f"{employee_row['RiskScore']:.0f}%")
+
+        with lookup_col2:
+            st.metric("Risk level", employee_row["RiskLevel"])
+
+        detail_columns = [
+            column for column in st.session_state.data_columns
+            if column not in [target_column, id_column]
+        ][:10]
+
+        st.write("**Employee details:**")
+
+        details_table = pd.DataFrame({
+            "Attribute": detail_columns,
+            "Value": [employee_row[column] for column in detail_columns]
+        })
+
+        st.dataframe(details_table, use_container_width=True, hide_index=True)
+
+        if not pattern_df.empty:
+
+            st.write("**Top factors for this employee:**")
+
+            top_pattern_features = pattern_df["Feature"].head(3).tolist()
+
+            for feature in top_pattern_features:
+
+                if feature in employee_row.index:
+
+                    employee_value = employee_row[feature]
+                    feature_pattern = pattern_df[
+                        pattern_df["Feature"] == feature
+                    ].iloc[0]
+
+                    stayed_avg = feature_pattern["Stayed average"]
+                    left_avg = feature_pattern["Left average"]
+
+                    closer_to_left = (
+                        abs(employee_value - left_avg)
+                        < abs(employee_value - stayed_avg)
+                    )
+
+                    direction = (
+                        "closer to the pattern seen in employees who left"
+                        if closer_to_left
+                        else "closer to the pattern seen in employees who stayed"
+                    )
+
+                    st.write(
+                        f"- **{feature}**: this employee's value is "
+                        f"**{employee_value:.1f}** ({direction}). "
+                        f"Average for employees who left: {left_avg:.1f}, "
+                        f"average for employees who stayed: {stayed_avg:.1f}."
+                    )
+
+        st.markdown("---")
+
+        st.subheader("All employees ranked by risk")
+
+        ranked_columns = [id_column, "RiskScore", "RiskLevel"]
+
+        if department_column and department_column in results_df.columns:
+            ranked_columns.insert(1, department_column)
+
+        ranked_table = results_df[ranked_columns].sort_values(
+            "RiskScore", ascending=False
+        )
+
+        st.dataframe(
+            ranked_table.style.format({"RiskScore": "{:.0f}%"}),
+            use_container_width=True,
+            hide_index=True
+        )
 
 
 # ------------------------------------------------------------
-# FOOTER
+# PAGE: ABOUT
 # ------------------------------------------------------------
 
-st.markdown("---")
+elif page == "About":
 
-st.caption(
-    "Retentia • Employee attrition analytics • "
-    "Synthetic or appropriately authorized data recommended for testing"
-)
+    st.markdown(
+        '<div class="section-title">About Retentia</div>',
+        unsafe_allow_html=True
+    )
+
+    st.write(
+        "Retentia is an employee attrition analytics tool. It helps "
+        "organizations understand which patterns are associated with "
+        "employees leaving, using their own workforce data, and turns "
+        "those patterns into plain-English findings and recommended "
+        "actions."
+    )
+
+    st.subheader("How it works")
+
+    st.write(
+        "Retentia cleans an uploaded employee dataset, trains a "
+        "decision-tree model to distinguish employees who left from "
+        "those who stayed, and reports which factors the model relied "
+        "on most. It also estimates a risk score for every employee "
+        "in the uploaded dataset."
+    )
+
+    st.subheader("Limitations")
+
+    st.write(
+        "Retentia is a decision-support tool, not a decision-making "
+        "tool. Predictions reflect statistical patterns in the "
+        "uploaded dataset and should always be reviewed alongside "
+        "employee feedback, organizational context, and other "
+        "evidence — especially before any action is taken regarding "
+        "an individual employee."
+    )
+
+    st.markdown("---")
+
+    st.caption(
+        "Retentia • Employee attrition analytics • "
+        "Synthetic or appropriately authorized data recommended for testing"
+    )
