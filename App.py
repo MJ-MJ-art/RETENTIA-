@@ -441,9 +441,13 @@ if st.session_state.user is None:
 
     with center_col:
 
+        st.markdown('<div class="login-card">', unsafe_allow_html=True)
+
+        logo_col1, logo_col2, logo_col3 = st.columns([1, 2, 1])
+        with logo_col2:
+            st.image("logo.png", use_container_width=True)
+
         st.markdown(
-            '<div class="login-card">'
-            '<div class="login-title">Retentia</div>'
             '<div class="login-subtitle">'
             'Log in or create an account to continue'
             '</div>'
@@ -518,10 +522,7 @@ if st.session_state.user is None:
 # HEADER (shown on every page once logged in)
 # ------------------------------------------------------------
 
-st.markdown(
-    '<div class="main-title">Retentia</div>',
-    unsafe_allow_html=True
-)
+st.image("logo.png", width=230)
 
 st.markdown(
     '<div class="subtitle">'
@@ -535,8 +536,8 @@ st.markdown(
 # SIDEBAR NAVIGATION (only reached once logged in)
 # ------------------------------------------------------------
 
+st.sidebar.image("logo.png", width=140)
 st.sidebar.markdown(
-    '<div class="sidebar-brand">Retentia</div>'
     '<div class="sidebar-tagline">Attrition analytics</div>',
     unsafe_allow_html=True
 )
