@@ -218,7 +218,7 @@ if not st.session_state.splash_seen:
     st.markdown(
         f"""
         <style>
-            .splash-overlay {
+            .splash-overlay {{
                 position: fixed;
                 top: 0;
                 left: 0;
@@ -229,12 +229,12 @@ if not st.session_state.splash_seen:
                 justify-content: center;
                 align-items: center;
                 z-index: 9999;
-            }
+            }}
 
-            .splash-overlay img {
+            .splash-overlay img {{
                 width: 300px;
                 max-width: 70vw;
-            }
+            }}
         </style>
 
         <div class="splash-overlay">
