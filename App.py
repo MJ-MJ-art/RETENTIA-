@@ -1066,6 +1066,84 @@ def get_feature_importance(pipeline):
     return importance_df
 
 
+
+def suggest_action_for_factor(feature_name):
+    """
+    Maps a data column name to a specific, tailored management action
+    suggestion, based on common HR/attrition factors. Falls back to a
+    generic suggestion for factors that don't match a known category,
+    so every factor still produces useful text.
+    """
+
+    name = str(feature_name).lower()
+
+    if "promot" in name:
+        return (
+            "Review this employee's promotion timeline and discuss "
+            "career growth opportunities with their manager."
+        )
+
+    if "training" in name:
+        return (
+            "Explore additional training or development opportunities "
+            "for this employee."
+        )
+
+    if "overtime" in name or "workload" in name or "hours" in name:
+        return (
+            "Assess this employee's current workload and overtime "
+            "levels, and consider redistributing tasks or resetting "
+            "expectations."
+        )
+
+    if any(word in name for word in ["salary", "income", "pay", "compensation"]):
+        return (
+            "Review this employee's compensation relative to their "
+            "role and current market benchmarks."
+        )
+
+    if "satisfaction" in name:
+        return (
+            "Have a direct, informal conversation with this employee "
+            "about their day-to-day satisfaction and any concerns."
+        )
+
+    if "worklife" in name or "work_life" in name or "balance" in name:
+        return (
+            "Check in on this employee's work-life balance and any "
+            "flexibility needs they may have."
+        )
+
+    if "tenure" in name or "years" in name:
+        return (
+            "Consider this employee's tenure stage - employees at "
+            "this stage without recent recognition often benefit "
+            "from a dedicated check-in."
+        )
+
+    if "attendance" in name:
+        return (
+            "Look into recent attendance patterns - they can signal "
+            "disengagement or personal challenges worth checking in on."
+        )
+
+    if "performance" in name:
+        return (
+            "Review recent performance feedback with this employee's "
+            "manager to make sure it's been fair, clear, and "
+            "constructive."
+        )
+
+    if "environment" in name:
+        return (
+            "Gather direct feedback from this employee about their "
+            "team and day-to-day work environment."
+        )
+
+    return (
+        f"Review this employee's {feature_name} more closely with "
+        f"their manager, since it stands out relative to peers."
+    )
 # ------------------------------------------------------------
 # PAGE: HOME
 # ------------------------------------------------------------
@@ -1768,6 +1846,7 @@ elif page == "Employee Lookup":
                 st.write("**Top factors for this employee:**")
 
                 top_pattern_features = pattern_df["Feature"].head(3).tolist()
+                risk_driving_factors = []
 
                 for feature in top_pattern_features:
 
@@ -1786,6 +1865,9 @@ elif page == "Employee Lookup":
                             < abs(employee_value - stayed_avg)
                         )
 
+                        if closer_to_left:
+                            risk_driving_factors.append(feature)
+
                         direction = (
                             "closer to the pattern seen in employees "
                             "who left"
@@ -1801,6 +1883,43 @@ elif page == "Employee Lookup":
                             f"{left_avg:.1f}, average for employees who "
                             f"stayed: {stayed_avg:.1f}."
                         )
+
+                # ------------------------------------------------
+                # PERSONALIZED RECOMMENDATION FOR THIS EMPLOYEE
+                # ------------------------------------------------
+
+                st.write("**Recommended action for this employee:**")
+
+                if employee_row["RiskLevel"] == "Low risk":
+
+                    st.write(
+                        "No urgent action needed based on this data. "
+                        "Continue regular check-ins as part of normal "
+                        "management practice."
+                    )
+
+                elif risk_driving_factors:
+
+                    for feature in risk_driving_factors:
+                        st.write(
+                            f"- {suggest_action_for_factor(feature)}"
+                        )
+
+                    st.caption(
+                        "These suggestions are based on the factors "
+                        "most associated with this specific employee's "
+                        "risk score, not the company-wide averages "
+                        "shown in the Analyze page. Use them as a "
+                        "starting point for a conversation, not a "
+                        "final decision."
+                    )
+
+                else:
+                    st.write(
+                        "This employee's risk score isn't clearly "
+                        "explained by the top overall factors - a "
+                        "direct check-in is the best next step."
+                    )
 
         # ----------------------------------------------------
         # TAB: FULL RANKING
