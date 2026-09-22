@@ -249,6 +249,86 @@ if not st.session_state.splash_seen:
     st.rerun()
 
 
+# ------------------------------------------------------------
+# ONBOARDING CAROUSEL
+# ------------------------------------------------------------
+# Shown once per browser session, after the splash screen and
+# before login/sign up - a few swipeable-feeling slides introducing
+# what Retentia does, with a Skip option, the way many apps open.
+
+ONBOARDING_SLIDES = [
+    {"image": "onboarding_1.png", "alt": "Smarter Insights. Stronger Teams."},
+    {"image": "onboarding_2.png", "alt": "Data-Driven Better Decisions."},
+    {"image": "onboarding_3.png", "alt": "Better People. Bigger Possibilities."},
+]
+
+if "onboarding_seen" not in st.session_state:
+    st.session_state.onboarding_seen = False
+
+if "onboarding_index" not in st.session_state:
+    st.session_state.onboarding_index = 0
+
+if st.session_state.splash_seen and not st.session_state.onboarding_seen:
+
+    st.markdown(
+        """
+        <style>
+            .onboarding-wrap {
+                max-width: 380px;
+                margin: 0 auto;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    left_pad, center_pad, right_pad = st.columns([1, 2, 1])
+
+    with center_pad:
+
+        st.markdown('<div class="onboarding-wrap">', unsafe_allow_html=True)
+
+        current_slide = ONBOARDING_SLIDES[st.session_state.onboarding_index]
+        st.image(current_slide["image"], use_container_width=True)
+
+        # Simple dot indicator showing which slide this is
+        dots = "".join(
+            "● " if i == st.session_state.onboarding_index else "○ "
+            for i in range(len(ONBOARDING_SLIDES))
+        )
+        st.markdown(
+            f'<p style="text-align:center; color:#34D399; '
+            f'letter-spacing:4px;">{dots}</p>',
+            unsafe_allow_html=True
+        )
+
+        nav_col1, nav_col2 = st.columns(2)
+
+        is_last_slide = (
+            st.session_state.onboarding_index == len(ONBOARDING_SLIDES) - 1
+        )
+
+        with nav_col1:
+            if st.button("Skip", use_container_width=True):
+                st.session_state.onboarding_seen = True
+                st.rerun()
+
+        with nav_col2:
+            button_label = "Get Started" if is_last_slide else "Next"
+            if st.button(
+                button_label, use_container_width=True, type="primary"
+            ):
+                if is_last_slide:
+                    st.session_state.onboarding_seen = True
+                else:
+                    st.session_state.onboarding_index += 1
+                st.rerun()
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.stop()
+
+
 def load_saved_results(user_id):
     """
     Looks up this user's most recently saved analysis in Supabase
