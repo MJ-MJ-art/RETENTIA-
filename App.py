@@ -356,6 +356,13 @@ def load_saved_results(user_id):
             st.session_state.department_column = row["department_column"]
             st.session_state.target_column = row["target_column"]
             st.session_state.data_columns = row["data_columns"]
+            st.session_state.accuracy = row.get("accuracy")
+            st.session_state.precision = row.get("precision_score")
+            st.session_state.recall = row.get("recall_score")
+            importance_data = row.get("importance_json")
+            st.session_state.importance_df = (
+                pd.DataFrame(importance_data) if importance_data else None
+            )
             st.session_state.analyzed = True
 
     except Exception:
@@ -385,6 +392,12 @@ def save_results_to_db(user_id):
             st.session_state.pattern_df.to_json(orient="records")
         )
 
+        importance_json = None
+        if st.session_state.get("importance_df") is not None:
+            importance_json = json.loads(
+                st.session_state.importance_df.to_json(orient="records")
+            )
+
         supabase.table("retentia_results").insert({
             "user_id": user_id,
             "results_json": results_json,
@@ -393,6 +406,10 @@ def save_results_to_db(user_id):
             "department_column": st.session_state.department_column,
             "target_column": st.session_state.target_column,
             "data_columns": st.session_state.data_columns,
+            "accuracy": st.session_state.get("accuracy"),
+            "precision_score": st.session_state.get("precision"),
+            "recall_score": st.session_state.get("recall"),
+            "importance_json": importance_json,
         }).execute()
 
     except Exception as error:
@@ -511,6 +528,13 @@ def load_specific_analysis(row_id):
             st.session_state.department_column = row["department_column"]
             st.session_state.target_column = row["target_column"]
             st.session_state.data_columns = row["data_columns"]
+            st.session_state.accuracy = row.get("accuracy")
+            st.session_state.precision = row.get("precision_score")
+            st.session_state.recall = row.get("recall_score")
+            importance_data = row.get("importance_json")
+            st.session_state.importance_df = (
+                pd.DataFrame(importance_data) if importance_data else None
+            )
             st.session_state.analyzed = True
 
             return True
@@ -1123,113 +1147,261 @@ elif page == "Analyze":
         "`generate_data.py`."
     )
 
+    # ----------------------------------------------------------------
+    # Decide what to show: a fresh upload, a previously saved analysis
+    # (so navigating away and back doesn't lose everything), or
+    # nothing yet.
+    # ----------------------------------------------------------------
+
+    show_cached = False
+
     if uploaded_file is None:
 
-        st.write(
-            "Upload a CSV above to run the analysis. Results will also "
-            "become available on the Employee Lookup page once this "
-            "finishes."
-        )
+        if st.session_state.analyzed:
+            show_cached = True
+        else:
+            st.write(
+                "Upload a CSV above to run the analysis. Results will "
+                "also become available on the Employee Lookup page "
+                "once this finishes."
+            )
+            st.stop()
 
-        st.stop()
+    cleaning_stats_available = False
 
-    # --------------------------------------------------------
-    # LOADING SCREEN (shown once per newly uploaded file)
-    # --------------------------------------------------------
-    # Streamlit reruns this whole page on almost any interaction, so
-    # a plain time.sleep() here would fire again every time - not
-    # just on a genuinely new upload. Tracking the file's name and
-    # size lets this only trigger once per distinct file.
+    if uploaded_file is not None:
 
-    file_identifier = f"{uploaded_file.name}_{uploaded_file.size}"
+        # ------------------------------------------------------------
+        # LOADING SCREEN (shown once per newly uploaded file)
+        # ------------------------------------------------------------
 
-    if st.session_state.get("last_loading_shown_for") != file_identifier:
+        file_identifier = f"{uploaded_file.name}_{uploaded_file.size}"
 
-        st.markdown(
-            """
-            <style>
-                @keyframes gentle-bob {
-                    0%, 100% { transform: translateY(0px); }
-                    50% { transform: translateY(-10px); }
-                }
-                .loading-mascot img {
-                    animation: gentle-bob 2.2s ease-in-out infinite;
-                }
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
+        if st.session_state.get("last_loading_shown_for") != file_identifier:
 
-        loading_left, loading_center, loading_right = st.columns([1, 2, 1])
-
-        with loading_center:
-            st.markdown('<div class="loading-mascot">', unsafe_allow_html=True)
-            st.image("mascot_laptop.png", use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
             st.markdown(
-                '<p style="text-align:center; color:#8A928F;">'
-                'Analyzing your data…</p>',
+                """
+                <style>
+                    @keyframes gentle-bob {
+                        0%, 100% { transform: translateY(0px); }
+                        50% { transform: translateY(-10px); }
+                    }
+                    .loading-mascot img {
+                        animation: gentle-bob 2.2s ease-in-out infinite;
+                    }
+                </style>
+                """,
                 unsafe_allow_html=True
             )
 
-        time.sleep(6)
-        st.session_state.last_loading_shown_for = file_identifier
-        st.rerun()
+            loading_left, loading_center, loading_right = st.columns(
+                [1, 2, 1]
+            )
 
-    # --------------------------------------------------------
-    # LOAD DATA
-    # --------------------------------------------------------
+            with loading_center:
+                st.markdown(
+                    '<div class="loading-mascot">', unsafe_allow_html=True
+                )
+                st.image("mascot_laptop.png", use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown(
+                    '<p style="text-align:center; color:#8A928F;">'
+                    'Analyzing your data…</p>',
+                    unsafe_allow_html=True
+                )
 
-    try:
-        raw_data = pd.read_csv(uploaded_file)
-    except Exception as error:
-        st.error(f"Could not read the CSV file: {error}")
-        st.stop()
+            time.sleep(6)
+            st.session_state.last_loading_shown_for = file_identifier
+            st.rerun()
 
-    # --------------------------------------------------------
-    # CLEAN DATA
-    # --------------------------------------------------------
+        # ------------------------------------------------------------
+        # LOAD DATA
+        # ------------------------------------------------------------
 
-    (
-        data,
-        original_rows,
-        original_columns,
-        duplicate_count,
-        empty_columns
-    ) = clean_dataset(raw_data)
+        try:
+            raw_data = pd.read_csv(uploaded_file)
+        except Exception as error:
+            st.error(f"Could not read the CSV file: {error}")
+            st.stop()
 
-    # --------------------------------------------------------
-    # FIND TARGET
-    # --------------------------------------------------------
+        # ------------------------------------------------------------
+        # CLEAN DATA
+        # ------------------------------------------------------------
 
-    target_column, target = prepare_target(data)
+        (
+            data,
+            original_rows,
+            original_columns,
+            duplicate_count,
+            empty_columns
+        ) = clean_dataset(raw_data)
 
-    if target_column is None:
-        st.error(
-            "I could not find an attrition target column. "
-            "Please include a column such as Attrition, Left, "
-            "EmployeeAttrition, Exited, or Turnover."
+        cleaning_stats_available = True
+
+        # ------------------------------------------------------------
+        # FIND TARGET
+        # ------------------------------------------------------------
+
+        target_column, target = prepare_target(data)
+
+        if target_column is None:
+            st.error(
+                "I could not find an attrition target column. "
+                "Please include a column such as Attrition, Left, "
+                "EmployeeAttrition, Exited, or Turnover."
+            )
+            st.stop()
+
+        data[target_column] = target
+
+        before_target_cleanup = len(data)
+        data = data.dropna(subset=[target_column])
+        target_rows_removed = before_target_cleanup - len(data)
+
+        unique_target_values = set(data[target_column].unique())
+
+        if not unique_target_values.issubset({0, 1}):
+            st.error(
+                "The attrition column must represent two classes, "
+                "such as Yes/No or 1/0."
+            )
+            st.stop()
+
+        # ------------------------------------------------------------
+        # PREPARE MODEL DATA
+        # ------------------------------------------------------------
+
+        X, dropped_columns = build_model_data(data, target_column)
+        y = data[target_column]
+
+        if len(X) < 30:
+            st.warning(
+                "The dataset is quite small. Model metrics may be "
+                "unstable. For a realistic test, use several hundred "
+                "synthetic records or more."
+            )
+
+        # ------------------------------------------------------------
+        # TRAIN / TEST SPLIT
+        # ------------------------------------------------------------
+
+        try:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.25, random_state=42, stratify=y
+            )
+        except ValueError:
+            st.error(
+                "The dataset does not contain enough examples of both "
+                "attrition classes for a stratified train/test split."
+            )
+            st.stop()
+
+        # ------------------------------------------------------------
+        # TRAIN MODEL
+        # ------------------------------------------------------------
+
+        pipeline = make_pipeline(X)
+        pipeline.fit(X_train, y_train)
+
+        # ------------------------------------------------------------
+        # MODEL EVALUATION
+        # ------------------------------------------------------------
+
+        predictions = pipeline.predict(X_test)
+        accuracy = accuracy_score(y_test, predictions)
+        precision = precision_score(y_test, predictions, zero_division=0)
+        recall = recall_score(y_test, predictions, zero_division=0)
+
+        # ------------------------------------------------------------
+        # FEATURE IMPORTANCE
+        # ------------------------------------------------------------
+
+        importance_df = get_feature_importance(pipeline)
+
+        # ------------------------------------------------------------
+        # DEPARTMENT COLUMN
+        # ------------------------------------------------------------
+
+        department_column = find_column(
+            data, ["Department", "BusinessUnit", "JobRole"]
         )
-        st.stop()
 
-    data[target_column] = target
+        # ------------------------------------------------------------
+        # NUMERIC ATTRITION PATTERNS
+        # ------------------------------------------------------------
 
-    before_target_cleanup = len(data)
-    data = data.dropna(subset=[target_column])
-    target_rows_removed = before_target_cleanup - len(data)
+        numeric_columns = data.select_dtypes(
+            include=["number"]
+        ).columns.tolist()
+        numeric_columns = [c for c in numeric_columns if c != target_column]
 
-    unique_target_values = set(data[target_column].unique())
-
-    if not unique_target_values.issubset({0, 1}):
-        st.error(
-            "The attrition column must represent two classes, "
-            "such as Yes/No or 1/0."
+        pattern_df = pd.DataFrame(
+            columns=["Feature", "Stayed average", "Left average", "Difference"]
         )
-        st.stop()
 
-    # --------------------------------------------------------
-    # DATA SUMMARY
-    # --------------------------------------------------------
+        if numeric_columns:
+
+            pattern_rows = []
+
+            for column in numeric_columns:
+
+                stayed_values = data.loc[
+                    data[target_column] == 0, column
+                ].dropna()
+                left_values = data.loc[
+                    data[target_column] == 1, column
+                ].dropna()
+
+                if len(stayed_values) > 0 and len(left_values) > 0:
+                    pattern_rows.append({
+                        "Feature": column,
+                        "Stayed average": stayed_values.mean(),
+                        "Left average": left_values.mean(),
+                        "Difference": (
+                            left_values.mean() - stayed_values.mean()
+                        )
+                    })
+
+            if pattern_rows:
+
+                pattern_df = pd.DataFrame(pattern_rows)
+                pattern_df["Absolute Difference"] = (
+                    pattern_df["Difference"].abs()
+                )
+                pattern_df = (
+                    pattern_df
+                    .sort_values("Absolute Difference", ascending=False)
+                    .drop(columns=["Absolute Difference"])
+                    .head(10)
+                )
+
+        attrition_rate = data[target_column].mean() * 100
+
+    else:
+
+        # ------------------------------------------------------------
+        # SHOWING A CACHED (previously analyzed) RESULT
+        # ------------------------------------------------------------
+
+        st.info(
+            "Showing your most recently analyzed data. Upload a new "
+            "file above to run a new analysis."
+        )
+
+        results_df = st.session_state.results_df
+        data = results_df.drop(columns=["RiskScore", "RiskLevel"])
+        target_column = st.session_state.target_column
+        department_column = st.session_state.department_column
+        pattern_df = st.session_state.pattern_df
+        accuracy = st.session_state.get("accuracy")
+        precision = st.session_state.get("precision")
+        recall = st.session_state.get("recall")
+        importance_df = st.session_state.get("importance_df")
+        attrition_rate = data[target_column].mean() * 100
+
+    # ----------------------------------------------------------------
+    # SHARED DISPLAY - works for both a fresh upload and a cached one
+    # ----------------------------------------------------------------
 
     st.markdown(
         '<div class="section-title">Data overview</div>',
@@ -1245,141 +1417,111 @@ elif page == "Analyze":
         st.metric("Features", len(data.columns) - 1)
 
     with col3:
-        attrition_rate = data[target_column].mean() * 100
         st.metric("Observed attrition", f"{attrition_rate:.1f}%")
 
     with col4:
-        st.metric("Duplicate rows removed", duplicate_count)
-
-    with st.expander("View cleaning summary"):
-
-        st.write(
-            f"Original dataset: **{original_rows} rows × "
-            f"{original_columns} columns**."
-        )
-        st.write(
-            f"Final dataset: **{len(data)} rows × "
-            f"{len(data.columns)} columns**."
-        )
-        st.write(f"Duplicate rows removed: **{duplicate_count}**.")
-        st.write(
-            f"Rows with missing target values removed: "
-            f"**{target_rows_removed}**."
-        )
-
-        if empty_columns:
-            st.write(
-                "Completely empty columns removed: "
-                + ", ".join(map(str, empty_columns))
-            )
+        if cleaning_stats_available:
+            st.metric("Duplicate rows removed", duplicate_count)
         else:
-            st.write("No completely empty columns were found.")
+            st.metric("Duplicate rows removed", "—")
 
-        st.write(
-            "Missing values in predictor columns are handled "
-            "automatically during model training using median "
-            "imputation for numeric variables and most-frequent "
-            "imputation for categorical variables."
-        )
+    if cleaning_stats_available:
 
-    # --------------------------------------------------------
-    # PREPARE MODEL DATA
-    # --------------------------------------------------------
+        with st.expander("View cleaning summary"):
 
-    X, dropped_columns = build_model_data(data, target_column)
-    y = data[target_column]
+            st.write(
+                f"Original dataset: **{original_rows} rows × "
+                f"{original_columns} columns**."
+            )
+            st.write(
+                f"Final dataset: **{len(data)} rows × "
+                f"{len(data.columns)} columns**."
+            )
+            st.write(f"Duplicate rows removed: **{duplicate_count}**.")
+            st.write(
+                f"Rows with missing target values removed: "
+                f"**{target_rows_removed}**."
+            )
 
-    if len(X) < 30:
-        st.warning(
-            "The dataset is quite small. Model metrics may be unstable. "
-            "For a realistic test, use several hundred synthetic "
-            "records or more."
-        )
+            if empty_columns:
+                st.write(
+                    "Completely empty columns removed: "
+                    + ", ".join(map(str, empty_columns))
+                )
+            else:
+                st.write("No completely empty columns were found.")
 
-    # --------------------------------------------------------
-    # TRAIN / TEST SPLIT
-    # --------------------------------------------------------
+            st.write(
+                "Missing values in predictor columns are handled "
+                "automatically during model training using median "
+                "imputation for numeric variables and most-frequent "
+                "imputation for categorical variables."
+            )
 
-    try:
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.25, random_state=42, stratify=y
-        )
-    except ValueError:
-        st.error(
-            "The dataset does not contain enough examples of both "
-            "attrition classes for a stratified train/test split."
-        )
-        st.stop()
-
-    # --------------------------------------------------------
-    # TRAIN MODEL
-    # --------------------------------------------------------
-
-    pipeline = make_pipeline(X)
-    pipeline.fit(X_train, y_train)
-
-    # --------------------------------------------------------
-    # MODEL EVALUATION
-    # --------------------------------------------------------
-
-    predictions = pipeline.predict(X_test)
-    accuracy = accuracy_score(y_test, predictions)
-    precision = precision_score(y_test, predictions, zero_division=0)
-    recall = recall_score(y_test, predictions, zero_division=0)
+    # ------------------------------------------------------------
+    # MODEL PERFORMANCE
+    # ------------------------------------------------------------
 
     st.markdown(
         '<div class="section-title">Model performance</div>',
         unsafe_allow_html=True
     )
 
-    st.caption(
-        "These metrics describe performance on the held-out test data. "
-        "They should not be interpreted as proof that the model will "
-        "perform identically on future employees."
-    )
+    if accuracy is not None:
 
-    col1, col2, col3 = st.columns(3)
+        st.caption(
+            "These metrics describe performance on the held-out test "
+            "data. They should not be interpreted as proof that the "
+            "model will perform identically on future employees."
+        )
 
-    with col1:
-        st.metric("Accuracy", f"{accuracy:.1%}")
-    with col2:
-        st.metric("Precision", f"{precision:.1%}")
-    with col3:
-        st.metric("Recall", f"{recall:.1%}")
+        col1, col2, col3 = st.columns(3)
 
-    # --------------------------------------------------------
+        with col1:
+            st.metric("Accuracy", f"{accuracy:.1%}")
+        with col2:
+            st.metric("Precision", f"{precision:.1%}")
+        with col3:
+            st.metric("Recall", f"{recall:.1%}")
+
+    else:
+        st.write(
+            "Model performance metrics aren't available for this "
+            "analysis - upload a file above to run a fresh analysis."
+        )
+
+    # ------------------------------------------------------------
     # FEATURE IMPORTANCE
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
 
     st.markdown(
         '<div class="section-title">What drives the model?</div>',
         unsafe_allow_html=True
     )
 
-    importance_df = get_feature_importance(pipeline)
+    if importance_df is not None and not importance_df.empty:
 
-    top_features = importance_df.head(10).copy()
-    top_features = top_features.sort_values("Importance", ascending=True)
+        top_features = importance_df.head(10).copy()
+        top_features = top_features.sort_values("Importance", ascending=True)
 
-    st.bar_chart(top_features.set_index("Feature")["Importance"])
+        st.bar_chart(top_features.set_index("Feature")["Importance"])
 
-    st.caption(
-        "Feature importance indicates which variables the decision tree "
-        "used most strongly. It does not prove that a factor causes "
-        "employees to leave."
-    )
+        st.caption(
+            "Feature importance indicates which variables the decision "
+            "tree used most strongly. It does not prove that a factor "
+            "causes employees to leave."
+        )
 
-    # --------------------------------------------------------
+    else:
+        st.write("Feature importance isn't available for this analysis.")
+
+    # ------------------------------------------------------------
     # AGGREGATE ATTRITION ANALYSIS
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
 
     st.markdown(
         '<div class="section-title">Attrition patterns</div>',
         unsafe_allow_html=True
-    )
-
-    department_column = find_column(
-        data, ["Department", "BusinessUnit", "JobRole"]
     )
 
     if department_column:
@@ -1405,64 +1547,31 @@ elif page == "Analyze":
     else:
         st.write("No department or comparable grouping column was found.")
 
-    # --------------------------------------------------------
-    # NUMERIC ATTRITION PATTERNS
-    # --------------------------------------------------------
+    if pattern_df is not None and not pattern_df.empty:
 
-    numeric_columns = data.select_dtypes(include=["number"]).columns.tolist()
-    numeric_columns = [c for c in numeric_columns if c != target_column]
+        st.subheader("Largest numeric differences between groups")
 
-    pattern_df = pd.DataFrame(columns=["Feature", "Stayed average", "Left average", "Difference"])
+        st.dataframe(
+            pattern_df,
+            use_container_width=True,
+            hide_index=True
+        )
 
-    if numeric_columns:
-
-        pattern_rows = []
-
-        for column in numeric_columns:
-
-            stayed_values = data.loc[data[target_column] == 0, column].dropna()
-            left_values = data.loc[data[target_column] == 1, column].dropna()
-
-            if len(stayed_values) > 0 and len(left_values) > 0:
-                pattern_rows.append({
-                    "Feature": column,
-                    "Stayed average": stayed_values.mean(),
-                    "Left average": left_values.mean(),
-                    "Difference": left_values.mean() - stayed_values.mean()
-                })
-
-        if pattern_rows:
-
-            pattern_df = pd.DataFrame(pattern_rows)
-            pattern_df["Absolute Difference"] = pattern_df["Difference"].abs()
-            pattern_df = (
-                pattern_df
-                .sort_values("Absolute Difference", ascending=False)
-                .drop(columns=["Absolute Difference"])
-                .head(10)
-            )
-
-            st.subheader("Largest numeric differences between groups")
-
-            st.dataframe(
-                pattern_df,
-                use_container_width=True,
-                hide_index=True
-            )
-
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
     # OVERALL FINDINGS
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
 
     st.markdown(
         '<div class="section-title">Overall findings</div>',
         unsafe_allow_html=True
     )
 
-    top_feature_names = importance_df.head(3)["Feature"].tolist()
-    feature_text = ", ".join(top_feature_names)
+    if importance_df is not None and not importance_df.empty and accuracy is not None:
 
-    findings_text = f"""
+        top_feature_names = importance_df.head(3)["Feature"].tolist()
+        feature_text = ", ".join(top_feature_names)
+
+        findings_text = f"""
 The uploaded dataset contains **{len(data)} employees**, with an observed
 attrition rate of **{attrition_rate:.1f}%**.
 
@@ -1479,11 +1588,18 @@ attrition, and model predictions should be reviewed alongside
 employee feedback, organizational context, and other evidence.
 """
 
-    st.write(findings_text)
+        st.write(findings_text)
 
-    # --------------------------------------------------------
+    else:
+        st.write(
+            f"The uploaded dataset contains **{len(data)} employees**, "
+            f"with an observed attrition rate of "
+            f"**{attrition_rate:.1f}%**."
+        )
+
+    # ------------------------------------------------------------
     # RECOMMENDATIONS
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
 
     st.subheader("Recommended management actions")
 
@@ -1498,9 +1614,9 @@ employee feedback, organizational context, and other evidence.
     for number, recommendation in enumerate(recommendations, start=1):
         st.write(f"**{number}.** {recommendation}")
 
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
     # DATA PREVIEW
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
 
     st.markdown(
         '<div class="section-title">Cleaned data preview</div>',
@@ -1509,63 +1625,66 @@ employee feedback, organizational context, and other evidence.
 
     st.dataframe(data.head(20), use_container_width=True)
 
-    # --------------------------------------------------------
-    # COMPUTE + SAVE EMPLOYEE-LEVEL RESULTS FOR THE LOOKUP PAGE
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
+    # COMPUTE + SAVE EMPLOYEE-LEVEL RESULTS (fresh upload only)
+    # ------------------------------------------------------------
 
-    all_risk_scores = pipeline.predict_proba(X)[:, 1]
-    results_df = data.copy()
-    results_df["RiskScore"] = all_risk_scores * 100
+    if uploaded_file is not None:
 
-    high_threshold = st.session_state.preferences.get(
-        "high_risk_threshold", 66
-    )
-    medium_threshold = st.session_state.preferences.get(
-        "medium_risk_threshold", 33
-    )
+        all_risk_scores = pipeline.predict_proba(X)[:, 1]
+        results_df = data.copy()
+        results_df["RiskScore"] = all_risk_scores * 100
 
-    def risk_label(score):
-        if score >= high_threshold:
-            return "High risk"
-        elif score >= medium_threshold:
-            return "Medium risk"
-        else:
-            return "Low risk"
+        high_threshold = st.session_state.preferences.get(
+            "high_risk_threshold", 66
+        )
+        medium_threshold = st.session_state.preferences.get(
+            "medium_risk_threshold", 33
+        )
 
-    results_df["RiskLevel"] = results_df["RiskScore"].apply(risk_label)
+        def risk_label(score):
+            if score >= high_threshold:
+                return "High risk"
+            elif score >= medium_threshold:
+                return "Medium risk"
+            else:
+                return "Low risk"
 
-    id_column = find_column(
-        data, ["EmployeeID", "EmployeeNumber", "ID", "Employee Id"]
-    )
+        results_df["RiskLevel"] = results_df["RiskScore"].apply(risk_label)
 
-    if id_column is None:
-        results_df["RowNumber"] = range(1, len(results_df) + 1)
-        id_column = "RowNumber"
+        id_column = find_column(
+            data, ["EmployeeID", "EmployeeNumber", "ID", "Employee Id"]
+        )
 
-    # Save everything the Employee Lookup page needs
-    st.session_state.analyzed = True
-    st.session_state.results_df = results_df
-    st.session_state.pattern_df = pattern_df
-    st.session_state.id_column = id_column
-    st.session_state.department_column = department_column
-    st.session_state.target_column = target_column
-    st.session_state.data_columns = list(data.columns)
+        if id_column is None:
+            results_df["RowNumber"] = range(1, len(results_df) + 1)
+            id_column = "RowNumber"
 
-    # Also save it to this user's account in Supabase, so it's still
-    # here the next time they log in - not just for the rest of this
-    # browser session.
-    save_results_to_db(st.session_state.user.id)
+        # Save everything the Employee Lookup page - and this page,
+        # on a future visit - needs.
+        st.session_state.analyzed = True
+        st.session_state.results_df = results_df
+        st.session_state.pattern_df = pattern_df
+        st.session_state.id_column = id_column
+        st.session_state.department_column = department_column
+        st.session_state.target_column = target_column
+        st.session_state.data_columns = list(data.columns)
+        st.session_state.accuracy = accuracy
+        st.session_state.precision = precision
+        st.session_state.recall = recall
+        st.session_state.importance_df = importance_df
 
-    st.success(
-        "Analysis complete and saved to your account. Go to the "
-        "Employee Lookup page to explore individual employees, or "
-        "upload a new file above to re-analyze."
-    )
+        # Also save it to this user's account in Supabase, so it's
+        # still here the next time they log in - not just for the
+        # rest of this browser session.
+        save_results_to_db(st.session_state.user.id)
 
+        st.success(
+            "Analysis complete and saved to your account. Go to the "
+            "Employee Lookup page to explore individual employees, or "
+            "upload a new file above to re-analyze."
+        )
 
-# ------------------------------------------------------------
-# PAGE: EMPLOYEE LOOKUP
-# ------------------------------------------------------------
 
 elif page == "Employee Lookup":
 
