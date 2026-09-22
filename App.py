@@ -1067,83 +1067,178 @@ def get_feature_importance(pipeline):
 
 
 
-def suggest_action_for_factor(feature_name):
+def get_recommendation_details(feature_name):
     """
-    Maps a data column name to a specific, tailored management action
-    suggestion, based on common HR/attrition factors. Falls back to a
-    generic suggestion for factors that don't match a known category,
-    so every factor still produces useful text.
+    Maps a data column name to a tailored recommendation, made up of
+    a short "why it matters" explanation and 2 concrete next steps a
+    manager can actually act on - not just a single generic sentence.
+    Falls back to a generic-but-still-useful version for factors
+    that don't match a known category.
     """
 
     name = str(feature_name).lower()
 
     if "promot" in name:
-        return (
-            "Review this employee's promotion timeline and discuss "
-            "career growth opportunities with their manager."
-        )
+        return {
+            "why": (
+                "A lack of recent promotion is one of the strongest "
+                "predictors of leaving in this data - employees who "
+                "feel stuck often start looking elsewhere."
+            ),
+            "steps": [
+                "Schedule a career conversation to discuss their "
+                "growth path and a realistic promotion timeline.",
+                "Compare their progression against peers with similar "
+                "tenure to check if they've genuinely stalled."
+            ]
+        }
 
     if "training" in name:
-        return (
-            "Explore additional training or development opportunities "
-            "for this employee."
-        )
+        return {
+            "why": (
+                "Limited training or development activity can signal "
+                "an employee who feels their growth has plateaued."
+            ),
+            "steps": [
+                "Offer a specific training or development opportunity "
+                "relevant to their role or next career step.",
+                "Ask them directly what skills or growth areas they're "
+                "interested in pursuing."
+            ]
+        }
 
     if "overtime" in name or "workload" in name or "hours" in name:
-        return (
-            "Assess this employee's current workload and overtime "
-            "levels, and consider redistributing tasks or resetting "
-            "expectations."
-        )
+        return {
+            "why": (
+                "High workload or overtime is strongly linked to "
+                "burnout, and burnt-out employees are far more likely "
+                "to leave."
+            ),
+            "steps": [
+                "Review their current workload with their manager and "
+                "look for tasks that can be redistributed.",
+                "Ask them directly whether their workload feels "
+                "sustainable right now."
+            ]
+        }
 
     if any(word in name for word in ["salary", "income", "pay", "compensation"]):
-        return (
-            "Review this employee's compensation relative to their "
-            "role and current market benchmarks."
-        )
+        return {
+            "why": (
+                "Compensation that falls behind role or market "
+                "expectations is a common, concrete reason employees "
+                "leave for another offer."
+            ),
+            "steps": [
+                "Benchmark their current pay against similar roles, "
+                "both internally and in the market.",
+                "If a raise isn't immediately possible, be transparent "
+                "with them about the timeline and path to one."
+            ]
+        }
 
     if "satisfaction" in name:
-        return (
-            "Have a direct, informal conversation with this employee "
-            "about their day-to-day satisfaction and any concerns."
-        )
+        return {
+            "why": (
+                "Low reported satisfaction often reflects something "
+                "specific and fixable - but only if it gets surfaced "
+                "and addressed."
+            ),
+            "steps": [
+                "Have a direct, informal conversation about what's "
+                "going well and what isn't for them right now.",
+                "Follow up on anything they raise within a set "
+                "timeframe, so the conversation doesn't feel one-off."
+            ]
+        }
 
     if "worklife" in name or "work_life" in name or "balance" in name:
-        return (
-            "Check in on this employee's work-life balance and any "
-            "flexibility needs they may have."
-        )
+        return {
+            "why": (
+                "Poor work-life balance is a common, often "
+                "under-discussed driver of attrition that rarely "
+                "shows up until someone's already decided to leave."
+            ),
+            "steps": [
+                "Check in on their current balance and any flexibility "
+                "or scheduling needs they may have.",
+                "Look at whether recent deadlines or projects have "
+                "made this worse than usual."
+            ]
+        }
 
     if "tenure" in name or "years" in name:
-        return (
-            "Consider this employee's tenure stage - employees at "
-            "this stage without recent recognition often benefit "
-            "from a dedicated check-in."
-        )
+        return {
+            "why": (
+                "Employees at this tenure stage, without a recent "
+                "change in role or recognition, are statistically more "
+                "likely to start considering other options."
+            ),
+            "steps": [
+                "Schedule a dedicated check-in focused on their "
+                "long-term path at the company, not just current work.",
+                "Make sure their contributions to date have been "
+                "clearly recognized."
+            ]
+        }
 
     if "attendance" in name:
-        return (
-            "Look into recent attendance patterns - they can signal "
-            "disengagement or personal challenges worth checking in on."
-        )
+        return {
+            "why": (
+                "A change in attendance patterns can be an early "
+                "signal of disengagement or personal challenges, "
+                "often before someone starts actively job-hunting."
+            ),
+            "steps": [
+                "Check in personally rather than through a formal HR "
+                "process, to understand what's behind the change.",
+                "Watch whether the pattern is recent and worsening, or "
+                "long-standing."
+            ]
+        }
 
     if "performance" in name:
-        return (
-            "Review recent performance feedback with this employee's "
-            "manager to make sure it's been fair, clear, and "
-            "constructive."
-        )
+        return {
+            "why": (
+                "Performance concerns can either reflect a genuine "
+                "mismatch or unclear, unfair feedback - both increase "
+                "the chance of someone leaving."
+            ),
+            "steps": [
+                "Review recent performance feedback with their manager "
+                "to confirm it's been clear and constructive.",
+                "Ask the employee directly whether they feel their "
+                "feedback has been fair and actionable."
+            ]
+        }
 
     if "environment" in name:
-        return (
-            "Gather direct feedback from this employee about their "
-            "team and day-to-day work environment."
-        )
+        return {
+            "why": (
+                "How someone experiences their day-to-day team and "
+                "environment often matters as much as the work itself."
+            ),
+            "steps": [
+                "Gather direct feedback from them about their team and "
+                "working environment.",
+                "Check whether this feeling is shared by others on "
+                "their team, or specific to them."
+            ]
+        }
 
-    return (
-        f"Review this employee's {feature_name} more closely with "
-        f"their manager, since it stands out relative to peers."
-    )
+    return {
+        "why": (
+            f"This employee's {feature_name} stands out compared to "
+            f"peers, and is one of the stronger factors behind their "
+            f"risk score."
+        ),
+        "steps": [
+            f"Review their {feature_name} more closely with their "
+            f"manager to understand what's driving it.",
+            "Use this as a starting point for a direct conversation, "
+            "rather than a conclusion on its own."
+        ]
+    }
 # ------------------------------------------------------------
 # PAGE: HOME
 # ------------------------------------------------------------
@@ -1679,7 +1774,13 @@ employee feedback, organizational context, and other evidence.
     # RECOMMENDATIONS
     # ------------------------------------------------------------
 
-    st.subheader("Recommended management actions")
+    st.subheader("Recommended organization-wide actions")
+
+    st.caption(
+        "These are company-wide, systemic actions based on overall "
+        "patterns. For specific actions about an individual employee, "
+        "see the Employee Lookup page."
+    )
 
     recommendations = [
         "Review the strongest aggregate attrition patterns and investigate the underlying workplace causes.",
@@ -1901,9 +2002,16 @@ elif page == "Employee Lookup":
                 elif risk_driving_factors:
 
                     for feature in risk_driving_factors:
-                        st.write(
-                            f"- {suggest_action_for_factor(feature)}"
-                        )
+
+                        details = get_recommendation_details(feature)
+
+                        st.markdown(f"**{feature}**")
+                        st.write(details["why"])
+
+                        for step in details["steps"]:
+                            st.write(f"- {step}")
+
+                        st.write("")
 
                     st.caption(
                         "These suggestions are based on the factors "
