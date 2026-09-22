@@ -1134,6 +1134,49 @@ elif page == "Analyze":
         st.stop()
 
     # --------------------------------------------------------
+    # LOADING SCREEN (shown once per newly uploaded file)
+    # --------------------------------------------------------
+    # Streamlit reruns this whole page on almost any interaction, so
+    # a plain time.sleep() here would fire again every time - not
+    # just on a genuinely new upload. Tracking the file's name and
+    # size lets this only trigger once per distinct file.
+
+    file_identifier = f"{uploaded_file.name}_{uploaded_file.size}"
+
+    if st.session_state.get("last_loading_shown_for") != file_identifier:
+
+        st.markdown(
+            """
+            <style>
+                @keyframes gentle-bob {
+                    0%, 100% { transform: translateY(0px); }
+                    50% { transform: translateY(-10px); }
+                }
+                .loading-mascot img {
+                    animation: gentle-bob 2.2s ease-in-out infinite;
+                }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+
+        loading_left, loading_center, loading_right = st.columns([1, 2, 1])
+
+        with loading_center:
+            st.markdown('<div class="loading-mascot">', unsafe_allow_html=True)
+            st.image("mascot_laptop.png", use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<p style="text-align:center; color:#8A928F;">'
+                'Analyzing your data…</p>',
+                unsafe_allow_html=True
+            )
+
+        time.sleep(6)
+        st.session_state.last_loading_shown_for = file_identifier
+        st.rerun()
+
+    # --------------------------------------------------------
     # LOAD DATA
     # --------------------------------------------------------
 
