@@ -707,10 +707,14 @@ if company_name:
 
 st.sidebar.caption(f"Logged in as {st.session_state.user.email}")
 
+if "nav_page" not in st.session_state:
+    st.session_state.nav_page = "Home"
+
 page = st.sidebar.radio(
     "Navigate",
     ["Home", "Analyze", "Employee Lookup", "History", "Settings", "About"],
-    label_visibility="collapsed"
+    label_visibility="collapsed",
+    key="nav_page"
 )
 
 st.sidebar.markdown("---")
@@ -1239,6 +1243,39 @@ def get_recommendation_details(feature_name):
             "rather than a conclusion on its own."
         ]
     }
+
+def format_time_ago(timestamp_str):
+    """
+    Converts a Supabase timestamp string into a short "time ago"
+    label like "2h ago" or "3d ago", for the Recent Activity feed.
+    Falls back to the raw string if it can't be parsed.
+    """
+
+    from datetime import datetime, timezone
+
+    try:
+        clean = timestamp_str.replace("Z", "+00:00")
+        then = datetime.fromisoformat(clean)
+
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+
+        now = datetime.now(timezone.utc)
+        diff = now - then
+
+        seconds = diff.total_seconds()
+
+        if seconds < 60:
+            return "just now"
+        elif seconds < 3600:
+            return f"{int(seconds // 60)}m ago"
+        elif seconds < 86400:
+            return f"{int(seconds // 3600)}h ago"
+        else:
+            return f"{int(seconds // 86400)}d ago"
+
+    except Exception:
+        return timestamp_str
 # ------------------------------------------------------------
 # PAGE: HOME
 # ------------------------------------------------------------
@@ -1246,49 +1283,301 @@ def get_recommendation_details(feature_name):
 if page == "Home":
 
     st.markdown(
-        '<div class="info-box">'
-        '<strong style="color:#34D399;">Turn "why are people leaving?" '
-        'into an answer.</strong><br><br>'
-        'Retentia analyzes your workforce data to show which employees '
-        'are at risk of leaving, why, and what to do about it — before '
-        'they hand in notice.'
-        '</div>',
+        """
+        <style>
+            .hero-badge {
+                display: inline-block;
+                padding: 6px 16px;
+                border-radius: 20px;
+                background-color: rgba(16, 185, 129, 0.12);
+                border: 1px solid rgba(16, 185, 129, 0.3);
+                color: #34D399;
+                font-size: 13px;
+                font-weight: 600;
+                margin-bottom: 18px;
+            }
+
+            .hero-heading {
+                font-family: 'Space Grotesk', sans-serif;
+                font-size: 44px;
+                font-weight: 700;
+                line-height: 1.15;
+                color: #F2F4F3;
+                margin-bottom: 14px;
+            }
+
+            .hero-heading .accent {
+                background: linear-gradient(90deg, #34D399, #10B981);
+                -webkit-background-clip: text;
+                background-clip: text;
+                color: transparent;
+            }
+
+            .hero-subtext {
+                font-size: 15px;
+                color: #8A928F;
+                max-width: 520px;
+                margin-bottom: 22px;
+            }
+
+            .feature-card {
+                background-color: #131615;
+                border: 1px solid #1F2422;
+                border-radius: 12px;
+                padding: 20px;
+                height: 100%;
+            }
+
+            .feature-card h4 {
+                font-family: 'Space Grotesk', sans-serif;
+                font-size: 17px;
+                margin: 10px 0 6px 0;
+                color: #F2F4F3;
+            }
+
+            .feature-card p {
+                font-size: 13px;
+                color: #8A928F;
+                margin-bottom: 0;
+            }
+
+            .stat-card {
+                background-color: #131615;
+                border: 1px solid #1F2422;
+                border-radius: 12px;
+                padding: 18px 20px;
+            }
+
+            .stat-number {
+                font-family: 'Space Grotesk', sans-serif;
+                font-size: 30px;
+                font-weight: 700;
+                color: #F2F4F3;
+            }
+
+            .stat-label {
+                font-size: 13px;
+                color: #8A928F;
+                margin-bottom: 4px;
+            }
+
+            .activity-item {
+                display: flex;
+                justify-content: space-between;
+                padding: 10px 0;
+                border-bottom: 1px solid #1F2422;
+                font-size: 13px;
+            }
+
+            .activity-item:last-child {
+                border-bottom: none;
+            }
+
+            .activity-title {
+                color: #F2F4F3;
+                font-weight: 600;
+            }
+
+            .activity-sub {
+                color: #8A928F;
+                font-size: 12px;
+            }
+
+            .activity-time {
+                color: #6B726F;
+                font-size: 12px;
+                white-space: nowrap;
+            }
+        </style>
+        """,
         unsafe_allow_html=True
     )
 
-    st.subheader("What Retentia does")
+    # --------------------------------------------------------
+    # HERO
+    # --------------------------------------------------------
 
-    col1, col2, col3 = st.columns(3)
+    display_name = st.session_state.preferences.get("company_name", "")
+    if not display_name:
+        display_name = st.session_state.user.email.split("@")[0]
 
-    with col1:
-        st.metric("1", "Clean data")
-        st.caption("Upload a CSV and Retentia automatically cleans it.")
+    hero_col, mascot_col = st.columns([3, 2])
 
-    with col2:
-        st.metric("2", "Train a model")
-        st.caption("A decision-tree model learns what predicts attrition.")
+    with hero_col:
 
-    with col3:
-        st.metric("3", "Understand patterns")
-        st.caption("See what drives risk, company-wide and per employee.")
+        st.markdown(
+            '<div class="hero-badge">Employee Attrition Early Warning '
+            'System</div>',
+            unsafe_allow_html=True
+        )
 
-    st.markdown("---")
+        st.markdown(
+            f'<div class="hero-heading">Welcome back,<br>'
+            f'<span class="accent">{display_name}!</span></div>',
+            unsafe_allow_html=True
+        )
 
-    st.subheader("Getting started")
+        st.markdown(
+            '<div class="hero-subtext">Retentia helps you predict, '
+            'understand, and reduce employee attrition — so you can '
+            'build a healthier, more engaged workforce.</div>',
+            unsafe_allow_html=True
+        )
 
-    st.write(
-        "Go to the **Analyze** page from the sidebar to upload your "
-        "employee data. Once analyzed, you can explore individual "
-        "employees on the **Employee Lookup** page at any time, "
-        "without re-uploading."
-    )
+        if st.button("Get Started →", type="primary"):
+            st.session_state.nav_page = "Analyze"
+            st.rerun()
 
-    st.subheader("Expected data")
+    with mascot_col:
+        st.image("mascot_laptop.png", use_container_width=True)
 
-    st.write(
-        "Your CSV should contain an attrition/left column and employee "
-        "attributes such as department, salary, tenure, overtime, "
-        "performance, promotion history, attendance, or similar fields."
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # --------------------------------------------------------
+    # FEATURE CARDS
+    # --------------------------------------------------------
+
+    feature_cards = [
+        ("Analyze", "Upload your employee data and let Retentia find attrition risks."),
+        ("Employee Lookup", "Check individual attrition risk factors in seconds."),
+        ("History", "View past analyses and track changes over time."),
+        ("Settings", "Manage your account, preferences, and risk thresholds."),
+        ("About", "Learn more about Retentia and how it works."),
+    ]
+
+    card_cols = st.columns(5)
+
+    for i, (title, description) in enumerate(feature_cards):
+        with card_cols[i]:
+            st.markdown(
+                f'<div class="feature-card"><h4>{title}</h4>'
+                f'<p>{description}</p></div>',
+                unsafe_allow_html=True
+            )
+            if st.button("Open →", key=f"home_nav_{title}", use_container_width=True):
+                st.session_state.nav_page = title
+                st.rerun()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # --------------------------------------------------------
+    # WORKFORCE AT A GLANCE + RECENT ACTIVITY
+    # --------------------------------------------------------
+
+    glance_col, activity_col = st.columns([3, 2])
+
+    with glance_col:
+
+        st.markdown(
+            '<div class="section-title" style="margin-top:0;">'
+            'Your workforce at a glance</div>',
+            unsafe_allow_html=True
+        )
+
+        if st.session_state.analyzed:
+
+            results_df = st.session_state.results_df
+            total_employees = len(results_df)
+            at_risk = (results_df["RiskLevel"] == "High risk").sum()
+            attrition_rate = (
+                results_df[st.session_state.target_column].mean() * 100
+            )
+            retention_rate = 100 - attrition_rate
+
+            stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+
+            with stat_col1:
+                st.markdown(
+                    f'<div class="stat-card">'
+                    f'<div class="stat-label">Total Employees</div>'
+                    f'<div class="stat-number">{total_employees}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+            with stat_col2:
+                st.markdown(
+                    f'<div class="stat-card">'
+                    f'<div class="stat-label">At Risk of Leaving</div>'
+                    f'<div class="stat-number">{at_risk}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+            with stat_col3:
+                st.markdown(
+                    f'<div class="stat-card">'
+                    f'<div class="stat-label">Retention Rate</div>'
+                    f'<div class="stat-number">{retention_rate:.0f}%</div>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+            with stat_col4:
+                st.markdown(
+                    f'<div class="stat-card">'
+                    f'<div class="stat-label">Attrition Rate</div>'
+                    f'<div class="stat-number">{attrition_rate:.1f}%</div>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+        else:
+
+            st.markdown(
+                '<div class="feature-card">No data analyzed yet. '
+                'Upload a CSV on the Analyze page to see your '
+                'workforce stats here.</div>',
+                unsafe_allow_html=True
+            )
+
+    with activity_col:
+
+        st.markdown(
+            '<div class="section-title" style="margin-top:0;">'
+            'Recent activity</div>',
+            unsafe_allow_html=True
+        )
+
+        history = load_analysis_history(st.session_state.user.id)
+
+        if not history:
+
+            st.markdown(
+                '<div class="feature-card">No activity yet. Your '
+                'analyses will show up here once you upload data.'
+                '</div>',
+                unsafe_allow_html=True
+            )
+
+        else:
+
+            activity_html = '<div class="feature-card">'
+
+            for entry in history[:4]:
+
+                employee_count = len(entry.get("results_json") or [])
+                time_ago = format_time_ago(entry.get("created_at", ""))
+
+                activity_html += (
+                    '<div class="activity-item">'
+                    '<div>'
+                    '<div class="activity-title">Analysis completed</div>'
+                    f'<div class="activity-sub">{employee_count} '
+                    'employees analyzed</div>'
+                    '</div>'
+                    f'<div class="activity-time">{time_ago}</div>'
+                    '</div>'
+                )
+
+            activity_html += '</div>'
+
+            st.markdown(activity_html, unsafe_allow_html=True)
+
+    st.caption(
+        "Note: the notification bell and account menu in the top "
+        "corner of the reference design aren't wired up yet - this "
+        "page focuses on real data from your account."
     )
 
 
