@@ -710,6 +710,15 @@ st.sidebar.caption(f"Logged in as {st.session_state.user.email}")
 if "nav_page" not in st.session_state:
     st.session_state.nav_page = "Home"
 
+# Buttons elsewhere in the app (like "Get Started" or a feature card)
+# can't set st.session_state.nav_page directly once this radio widget
+# has been drawn - Streamlit blocks that. Instead, they set
+# pending_nav, which gets applied here, BEFORE the widget below is
+# instantiated, which is allowed.
+if st.session_state.get("pending_nav"):
+    st.session_state.nav_page = st.session_state.pending_nav
+    st.session_state.pending_nav = None
+
 page = st.sidebar.radio(
     "Navigate",
     ["Home", "Analyze", "Employee Lookup", "History", "Settings", "About"],
@@ -1425,7 +1434,7 @@ if page == "Home":
         )
 
         if st.button("Get Started →", type="primary"):
-            st.session_state.nav_page = "Analyze"
+            st.session_state.pending_nav = "Analyze"
             st.rerun()
 
     with mascot_col:
@@ -1455,7 +1464,7 @@ if page == "Home":
                 unsafe_allow_html=True
             )
             if st.button("Open →", key=f"home_nav_{title}", use_container_width=True):
-                st.session_state.nav_page = title
+                st.session_state.pending_nav = title
                 st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
