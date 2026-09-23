@@ -53,7 +53,7 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=Caveat:wght@600&display=swap');
 
         html, body, [class*="css"] {
             font-family: 'Inter', sans-serif;
@@ -86,6 +86,15 @@ st.markdown(
             max-width: 620px;
         }
 
+        /* ---------- Handwritten accent text ---------- */
+        .handwritten-accent {
+            font-family: 'Caveat', cursive;
+            font-size: 30px;
+            color: #34D399;
+            line-height: 1.2;
+            transform: rotate(-2deg);
+        }
+
         /* ---------- Section headers ---------- */
         .section-title {
             font-family: 'Space Grotesk', sans-serif;
@@ -96,6 +105,19 @@ st.markdown(
             padding-left: 14px;
             border-left: 3px solid #10B981;
             color: #F2F4F3;
+        }
+
+        /* ---------- Page icon badge (top of each page) ---------- */
+        .page-icon-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #10B981, #0D9488);
+            font-size: 24px;
+            margin-bottom: 10px;
         }
 
         /* ---------- Info / welcome box ---------- */
@@ -129,6 +151,49 @@ st.markdown(
             font-size: 12px;
             color: #6B726F;
             margin-bottom: 18px;
+        }
+
+        /* ---------- Sidebar nav (radio, restyled as a nav list) ---------- */
+        section[data-testid="stSidebar"] div[role="radiogroup"] {
+            gap: 4px;
+        }
+
+        section[data-testid="stSidebar"] div[role="radiogroup"] label {
+            padding: 10px 14px;
+            border-radius: 10px;
+            width: 100%;
+            transition: background-color 0.15s ease;
+        }
+
+        section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+            background-color: #131615;
+        }
+
+        section[data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"],
+        section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+            background-color: rgba(16, 185, 129, 0.14);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+        }
+
+        /* ---------- Sidebar footer panel ---------- */
+        .sidebar-footer {
+            border-radius: 12px;
+            background: linear-gradient(160deg, #131615 0%, #0D1F19 100%);
+            border: 1px solid #1F2422;
+            padding: 16px 16px;
+            margin-top: 18px;
+        }
+
+        .sidebar-footer .line1 {
+            color: #F2F4F3;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .sidebar-footer .line2 {
+            color: #34D399;
+            font-size: 13px;
+            font-weight: 700;
         }
 
         /* ---------- Risk badges ---------- */
@@ -719,11 +784,21 @@ if st.session_state.get("pending_nav"):
     st.session_state.nav_page = st.session_state.pending_nav
     st.session_state.pending_nav = None
 
+NAV_ICONS = {
+    "Home": "🏠",
+    "Analyze": "📤",
+    "Employee Lookup": "👥",
+    "History": "🕐",
+    "Settings": "⚙️",
+    "About": "ℹ️",
+}
+
 page = st.sidebar.radio(
     "Navigate",
     ["Home", "Analyze", "Employee Lookup", "History", "Settings", "About"],
     label_visibility="collapsed",
-    key="nav_page"
+    key="nav_page",
+    format_func=lambda option: f"{NAV_ICONS.get(option, '')}  {option}"
 )
 
 st.sidebar.markdown("---")
@@ -739,6 +814,14 @@ if st.sidebar.button("Log out"):
     st.session_state.user = None
     st.session_state.analyzed = False
     st.rerun()
+
+st.sidebar.markdown(
+    '<div class="sidebar-footer">'
+    '<div class="line1">🍃 Better People.</div>'
+    '<div class="line2">Bigger Possibilities.</div>'
+    '</div>',
+    unsafe_allow_html=True
+)
 
 
 def risk_badge_html(risk_level):
@@ -1439,6 +1522,11 @@ if page == "Home":
 
     with mascot_col:
         st.image("mascot_laptop.png", use_container_width=True)
+        st.markdown(
+            '<div class="handwritten-accent" style="text-align:right;">'
+            'Happy Teams.<br>Stronger Businesses.</div>',
+            unsafe_allow_html=True
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1596,6 +1684,7 @@ if page == "Home":
 
 elif page == "Analyze":
 
+    st.markdown('<div class="page-icon-badge">📤</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="section-title">Analyze employee data</div>',
         unsafe_allow_html=True
@@ -2165,6 +2254,7 @@ employee feedback, organizational context, and other evidence.
 
 elif page == "Employee Lookup":
 
+    st.markdown('<div class="page-icon-badge">👥</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="section-title">Employee risk scores</div>',
         unsafe_allow_html=True
@@ -2381,6 +2471,7 @@ elif page == "Employee Lookup":
 
 elif page == "History":
 
+    st.markdown('<div class="page-icon-badge">🕐</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="section-title">Your analysis history</div>',
         unsafe_allow_html=True
@@ -2436,6 +2527,7 @@ elif page == "History":
 
 elif page == "Settings":
 
+    st.markdown('<div class="page-icon-badge">⚙️</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="section-title">Settings</div>',
         unsafe_allow_html=True
@@ -2513,6 +2605,7 @@ elif page == "Settings":
 
 elif page == "About":
 
+    st.markdown('<div class="page-icon-badge">ℹ️</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="section-title">About Retentia</div>',
         unsafe_allow_html=True
