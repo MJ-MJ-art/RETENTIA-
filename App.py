@@ -680,19 +680,23 @@ if st.session_state.user is None:
             with st.expander("Forgot password?"):
 
                 st.caption(
-                    "Enter your email above, then click below to get "
-                    "a password reset link sent to it."
+                    "Enter your email below, then click the button to "
+                    "get a password reset link sent to it."
+                )
+
+                reset_email = st.text_input(
+                    "Email for password reset", key="reset_email_input"
                 )
 
                 if st.button("Send password reset email"):
 
-                    if not email:
-                        st.warning(
-                            "Enter your email in the field above first."
-                        )
+                    if not reset_email:
+                        st.warning("Enter your email above first.")
                     else:
                         try:
-                            supabase.auth.reset_password_email(email)
+                            supabase.auth.reset_password_email(
+                                reset_email
+                            )
                             st.success(
                                 "If an account exists for that email, "
                                 "a password reset link has been sent."
