@@ -315,86 +315,6 @@ if not st.session_state.splash_seen:
     st.rerun()
 
 
-# ------------------------------------------------------------
-# ONBOARDING CAROUSEL
-# ------------------------------------------------------------
-# Shown once per browser session, after the splash screen and
-# before login/sign up - a few swipeable-feeling slides introducing
-# what Retentia does, with a Skip option, the way many apps open.
-
-ONBOARDING_SLIDES = [
-    {"image": "onboarding_1.png", "alt": "Smarter Insights. Stronger Teams."},
-    {"image": "onboarding_2.png", "alt": "Data-Driven Better Decisions."},
-    {"image": "onboarding_3.png", "alt": "Better People. Bigger Possibilities."},
-]
-
-if "onboarding_seen" not in st.session_state:
-    st.session_state.onboarding_seen = False
-
-if "onboarding_index" not in st.session_state:
-    st.session_state.onboarding_index = 0
-
-if st.session_state.splash_seen and not st.session_state.onboarding_seen:
-
-    st.markdown(
-        """
-        <style>
-            .onboarding-wrap {
-                max-width: 380px;
-                margin: 0 auto;
-            }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-
-    left_pad, center_pad, right_pad = st.columns([1, 2, 1])
-
-    with center_pad:
-
-        st.markdown('<div class="onboarding-wrap">', unsafe_allow_html=True)
-
-        current_slide = ONBOARDING_SLIDES[st.session_state.onboarding_index]
-        st.image(current_slide["image"], use_container_width=True)
-
-        # Simple dot indicator showing which slide this is
-        dots = "".join(
-            "● " if i == st.session_state.onboarding_index else "○ "
-            for i in range(len(ONBOARDING_SLIDES))
-        )
-        st.markdown(
-            f'<p style="text-align:center; color:#34D399; '
-            f'letter-spacing:4px;">{dots}</p>',
-            unsafe_allow_html=True
-        )
-
-        nav_col1, nav_col2 = st.columns(2)
-
-        is_last_slide = (
-            st.session_state.onboarding_index == len(ONBOARDING_SLIDES) - 1
-        )
-
-        with nav_col1:
-            if st.button("Skip", use_container_width=True):
-                st.session_state.onboarding_seen = True
-                st.rerun()
-
-        with nav_col2:
-            button_label = "Get Started" if is_last_slide else "Next"
-            if st.button(
-                button_label, use_container_width=True, type="primary"
-            ):
-                if is_last_slide:
-                    st.session_state.onboarding_seen = True
-                else:
-                    st.session_state.onboarding_index += 1
-                st.rerun()
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    st.stop()
-
-
 def load_saved_results(user_id):
     """
     Looks up this user's most recently saved analysis in Supabase
@@ -492,7 +412,8 @@ def load_preferences(user_id):
     defaults = {
         "company_name": "",
         "high_risk_threshold": 66,
-        "medium_risk_threshold": 33
+        "medium_risk_threshold": 33,
+        "onboarding_seen": False
     }
 
     try:
@@ -511,7 +432,8 @@ def load_preferences(user_id):
                 "high_risk_threshold": row.get("high_risk_threshold", 66),
                 "medium_risk_threshold": row.get(
                     "medium_risk_threshold", 33
-                )
+                ),
+                "onboarding_seen": row.get("onboarding_seen", False)
             }
         else:
             st.session_state.preferences = defaults
@@ -545,6 +467,25 @@ def save_preferences(user_id, company_name, high_threshold, medium_threshold):
     except Exception as error:
         st.warning(f"Could not save preferences: {error}")
         return False
+
+
+def mark_onboarding_seen(user_id):
+    """
+    Records that this account has seen the onboarding carousel, so
+    it isn't shown again on future logins - only leaves company_name
+    and thresholds untouched since only onboarding_seen is included.
+    """
+
+    try:
+        supabase.table("user_preferences").upsert({
+            "user_id": user_id,
+            "onboarding_seen": True
+        }).execute()
+
+        st.session_state.preferences["onboarding_seen"] = True
+
+    except Exception:
+        pass
 
 
 def load_analysis_history(user_id):
@@ -734,10 +675,117 @@ if st.session_state.user is None:
                 except Exception as error:
                     st.error(f"Could not sign up: {error}")
 
+        if auth_mode == "Log in":
+
+            with st.expander("Forgot password?"):
+
+                st.caption(
+                    "Enter your email above, then click below to get "
+                    "a password reset link sent to it."
+                )
+
+                if st.button("Send password reset email"):
+
+                    if not email:
+                        st.warning(
+                            "Enter your email in the field above first."
+                        )
+                    else:
+                        try:
+                            supabase.auth.reset_password_email(email)
+                            st.success(
+                                "If an account exists for that email, "
+                                "a password reset link has been sent."
+                            )
+                        except Exception as error:
+                            st.error(
+                                f"Could not send reset email: {error}"
+                            )
+
         st.caption(
             "Your data is kept private to your account and is never "
             "visible to other users."
         )
+
+    st.stop()
+
+
+# ------------------------------------------------------------
+# ONBOARDING CAROUSEL
+# ------------------------------------------------------------
+# Shown once per browser session, after the splash screen and
+# before login/sign up - a few swipeable-feeling slides introducing
+# what Retentia does, with a Skip option, the way many apps open.
+
+ONBOARDING_SLIDES = [
+    {"image": "onboarding_1.png", "alt": "Smarter Insights. Stronger Teams."},
+    {"image": "onboarding_2.png", "alt": "Data-Driven Better Decisions."},
+    {"image": "onboarding_3.png", "alt": "Better People. Bigger Possibilities."},
+]
+
+if "onboarding_seen" not in st.session_state:
+    st.session_state.onboarding_seen = False
+
+if "onboarding_index" not in st.session_state:
+    st.session_state.onboarding_index = 0
+
+if not st.session_state.preferences.get("onboarding_seen", False):
+
+    st.markdown(
+        """
+        <style>
+            .onboarding-wrap {
+                max-width: 380px;
+                margin: 0 auto;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    left_pad, center_pad, right_pad = st.columns([1, 2, 1])
+
+    with center_pad:
+
+        st.markdown('<div class="onboarding-wrap">', unsafe_allow_html=True)
+
+        current_slide = ONBOARDING_SLIDES[st.session_state.onboarding_index]
+        st.image(current_slide["image"], use_container_width=True)
+
+        # Simple dot indicator showing which slide this is
+        dots = "".join(
+            "● " if i == st.session_state.onboarding_index else "○ "
+            for i in range(len(ONBOARDING_SLIDES))
+        )
+        st.markdown(
+            f'<p style="text-align:center; color:#34D399; '
+            f'letter-spacing:4px;">{dots}</p>',
+            unsafe_allow_html=True
+        )
+
+        nav_col1, nav_col2 = st.columns(2)
+
+        is_last_slide = (
+            st.session_state.onboarding_index == len(ONBOARDING_SLIDES) - 1
+        )
+
+        with nav_col1:
+            if st.button("Skip", use_container_width=True):
+                mark_onboarding_seen(st.session_state.user.id)
+                st.rerun()
+
+        with nav_col2:
+            button_label = "Get Started" if is_last_slide else "Next"
+            if st.button(
+                button_label, use_container_width=True, type="primary"
+            ):
+                if is_last_slide:
+                    mark_onboarding_seen(st.session_state.user.id)
+                else:
+                    st.session_state.onboarding_index += 1
+                st.rerun()
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
     st.stop()
 
@@ -767,11 +815,30 @@ st.sidebar.markdown(
 )
 
 company_name = st.session_state.preferences.get("company_name", "")
+display_profile_name = (
+    company_name if company_name
+    else st.session_state.user.email.split("@")[0]
+)
 
-if company_name:
-    st.sidebar.caption(f"{company_name}")
+with st.sidebar.popover(
+    f"👤 {display_profile_name}", use_container_width=True
+):
+    st.write(f"**{display_profile_name}**")
+    st.caption(st.session_state.user.email)
+    st.markdown("---")
 
-st.sidebar.caption(f"Logged in as {st.session_state.user.email}")
+    if st.button(
+        "⚙️ My Account", use_container_width=True, key="profile_menu_account"
+    ):
+        st.session_state.pending_nav = "Settings"
+        st.rerun()
+
+    if st.button(
+        "🚪 Log out", use_container_width=True, key="profile_menu_logout"
+    ):
+        st.session_state.user = None
+        st.session_state.analyzed = False
+        st.rerun()
 
 if "nav_page" not in st.session_state:
     st.session_state.nav_page = "Home"
@@ -810,11 +877,6 @@ else:
     st.sidebar.caption(
         "No data analyzed yet. Go to the Analyze page to upload a CSV."
     )
-
-if st.sidebar.button("Log out"):
-    st.session_state.user = None
-    st.session_state.analyzed = False
-    st.rerun()
 
 st.sidebar.markdown(
     '<div class="sidebar-footer">'
