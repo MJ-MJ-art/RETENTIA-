@@ -35,6 +35,7 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score
 
 from supabase import create_client, Client
+import plotly.graph_objects as go
 
 # ------------------------------------------------------------
 # PAGE CONFIGURATION
@@ -1937,6 +1938,40 @@ elif page == "Analyze":
 
         attrition_rate = data[target_column].mean() * 100
 
+        # --------------------------------------------------------
+        # RISK SCORES (computed here so stat cards below can use
+        # them for both a fresh upload and this same run)
+        # --------------------------------------------------------
+
+        all_risk_scores = pipeline.predict_proba(X)[:, 1]
+        results_df = data.copy()
+        results_df["RiskScore"] = all_risk_scores * 100
+
+        high_threshold = st.session_state.preferences.get(
+            "high_risk_threshold", 66
+        )
+        medium_threshold = st.session_state.preferences.get(
+            "medium_risk_threshold", 33
+        )
+
+        def risk_label(score):
+            if score >= high_threshold:
+                return "High risk"
+            elif score >= medium_threshold:
+                return "Medium risk"
+            else:
+                return "Low risk"
+
+        results_df["RiskLevel"] = results_df["RiskScore"].apply(risk_label)
+
+        id_column = find_column(
+            data, ["EmployeeID", "EmployeeNumber", "ID", "Employee Id"]
+        )
+
+        if id_column is None:
+            results_df["RowNumber"] = range(1, len(results_df) + 1)
+            id_column = "RowNumber"
+
     else:
 
         # ------------------------------------------------------------
@@ -1958,32 +1993,171 @@ elif page == "Analyze":
         recall = st.session_state.get("recall")
         importance_df = st.session_state.get("importance_df")
         attrition_rate = data[target_column].mean() * 100
+        id_column = st.session_state.id_column
 
     # ----------------------------------------------------------------
     # SHARED DISPLAY - works for both a fresh upload and a cached one
     # ----------------------------------------------------------------
 
     st.markdown(
-        '<div class="section-title">Data overview</div>',
+        '<div class="section-title">Analysis results</div>',
         unsafe_allow_html=True
     )
 
-    col1, col2, col3, col4 = st.columns(4)
+    at_risk_count = (results_df["RiskLevel"] == "High risk").sum()
+    retention_rate = 100 - attrition_rate
 
-    with col1:
-        st.metric("Employees", len(data))
+    stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
 
-    with col2:
-        st.metric("Features", len(data.columns) - 1)
+    with stat_col1:
+        st.markdown(
+            '<div class="stat-card">'
+            '<div class="stat-label">👥 Total Employees</div>'
+            f'<div class="stat-number">{len(results_df)}</div>'
+            '</div>',
+            unsafe_allow_html=True
+        )
 
-    with col3:
-        st.metric("Observed attrition", f"{attrition_rate:.1f}%")
+    with stat_col2:
+        st.markdown(
+            '<div class="stat-card">'
+            '<div class="stat-label">⚠️ At Risk of Leaving</div>'
+            f'<div class="stat-number">{at_risk_count}</div>'
+            '</div>',
+            unsafe_allow_html=True
+        )
 
-    with col4:
-        if cleaning_stats_available:
-            st.metric("Duplicate rows removed", duplicate_count)
-        else:
-            st.metric("Duplicate rows removed", "—")
+    with stat_col3:
+        st.markdown(
+            '<div class="stat-card">'
+            '<div class="stat-label">🛡️ Retention Rate</div>'
+            f'<div class="stat-number">{retention_rate:.1f}%</div>'
+            '</div>',
+            unsafe_allow_html=True
+        )
+
+    with stat_col4:
+        st.markdown(
+            '<div class="stat-card">'
+            '<div class="stat-label">📈 Attrition Rate</div>'
+            f'<div class="stat-number">{attrition_rate:.1f}%</div>'
+            '</div>',
+            unsafe_allow_html=True
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # --------------------------------------------------------
+    # DONUT CHART: Attrition Risk Distribution
+    # --------------------------------------------------------
+
+    donut_col, insights_col = st.columns([3, 2])
+
+    with donut_col:
+
+        st.markdown(
+            '<div class="section-title">Attrition risk distribution'
+            '</div>',
+            unsafe_allow_html=True
+        )
+
+        risk_counts = (
+            results_df["RiskLevel"]
+            .value_counts()
+            .reindex(["High risk", "Medium risk", "Low risk"])
+            .fillna(0)
+        )
+
+        risk_colors = {
+            "High risk": "#EF4444",
+            "Medium risk": "#F59E0B",
+            "Low risk": "#34D399"
+        }
+
+        donut_fig = go.Figure(data=[go.Pie(
+            labels=risk_counts.index.tolist(),
+            values=risk_counts.values.tolist(),
+            hole=0.65,
+            marker=dict(
+                colors=[risk_colors[level] for level in risk_counts.index]
+            ),
+            textinfo="label+percent",
+            textfont=dict(color="#F2F4F3", size=12)
+        )])
+
+        donut_fig.update_layout(
+            showlegend=True,
+            legend=dict(font=dict(color="#F2F4F3")),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            annotations=[dict(
+                text=f"{(at_risk_count/len(results_df)*100):.1f}%<br>"
+                     f"High Risk",
+                x=0.5, y=0.5,
+                font=dict(size=18, color="#F2F4F3"),
+                showarrow=False
+            )],
+            margin=dict(t=10, b=10, l=10, r=10),
+            height=320
+        )
+
+        st.plotly_chart(donut_fig, use_container_width=True)
+
+    with insights_col:
+
+        st.markdown(
+            '<div class="section-title">Quick insights</div>',
+            unsafe_allow_html=True
+        )
+
+        insight_cards_html = '<div class="feature-card" style="margin-bottom:10px;">'
+        insight_added = False
+
+        if department_column and department_column in results_df.columns:
+
+            dept_risk = (
+                results_df.groupby(department_column)["RiskLevel"]
+                .apply(lambda s: (s == "High risk").mean() * 100)
+                .sort_values(ascending=False)
+            )
+
+            if len(dept_risk) > 0 and dept_risk.iloc[0] > 0:
+                top_dept = dept_risk.index[0]
+                top_dept_rate = dept_risk.iloc[0]
+                insight_cards_html += (
+                    f'<p>🔴 <strong>{top_dept}</strong> has the highest '
+                    f'high-risk share, at {top_dept_rate:.1f}% of its '
+                    f'employees.</p>'
+                )
+                insight_added = True
+
+        if importance_df is not None and not importance_df.empty:
+            top_driver = importance_df.iloc[0]["Feature"]
+            insight_cards_html += (
+                f'<p>📊 <strong>{top_driver}</strong> is the single '
+                f'strongest predictor of attrition in this dataset.</p>'
+            )
+            insight_added = True
+
+        if not pattern_df.empty:
+            top_pattern = pattern_df.iloc[0]
+            insight_cards_html += (
+                f'<p>📈 Employees who left differ most from those who '
+                f'stayed on <strong>{top_pattern["Feature"]}</strong> '
+                f'(left avg {top_pattern["Left average"]:.1f} vs. '
+                f'stayed avg {top_pattern["Stayed average"]:.1f}).</p>'
+            )
+            insight_added = True
+
+        if not insight_added:
+            insight_cards_html += (
+                "<p>Not enough patterns in this dataset yet to "
+                "generate insights.</p>"
+            )
+
+        insight_cards_html += '</div>'
+
+        st.markdown(insight_cards_html, unsafe_allow_html=True)
 
     if cleaning_stats_available:
 
@@ -2055,20 +2229,47 @@ elif page == "Analyze":
     # ------------------------------------------------------------
 
     st.markdown(
-        '<div class="section-title">What drives the model?</div>',
+        '<div class="section-title">Top risk factors</div>',
         unsafe_allow_html=True
     )
 
     if importance_df is not None and not importance_df.empty:
 
-        top_features = importance_df.head(10).copy()
-        top_features = top_features.sort_values("Importance", ascending=True)
+        top_features = importance_df.head(6).copy()
+        max_importance = top_features["Importance"].max()
 
-        st.bar_chart(top_features.set_index("Feature")["Importance"])
+        bars_html = '<div class="feature-card">'
+
+        for _, row in top_features.iterrows():
+
+            pct = (
+                (row["Importance"] / max_importance * 100)
+                if max_importance > 0 else 0
+            )
+
+            bars_html += f'''
+            <div style="margin-bottom:14px;">
+                <div style="display:flex; justify-content:space-between;
+                            font-size:13px; color:#F2F4F3; margin-bottom:4px;">
+                    <span>{row["Feature"]}</span>
+                    <span style="color:#34D399;">{pct:.0f}%</span>
+                </div>
+                <div style="background:#1F2422; border-radius:6px; height:8px;">
+                    <div style="background:linear-gradient(90deg,#0D9488,#34D399);
+                                width:{pct:.0f}%; height:8px; border-radius:6px;">
+                    </div>
+                </div>
+            </div>
+            '''
+
+        bars_html += '</div>'
+
+        st.markdown(bars_html, unsafe_allow_html=True)
 
         st.caption(
             "Feature importance indicates which variables the decision "
-            "tree used most strongly. It does not prove that a factor "
+            "tree used most strongly, shown here relative to the "
+            "single strongest factor. It does not prove that a factor "
             "causes employees to leave."
         )
 
@@ -2192,39 +2393,10 @@ employee feedback, organizational context, and other evidence.
     st.dataframe(data.head(20), use_container_width=True)
 
     # ------------------------------------------------------------
-    # COMPUTE + SAVE EMPLOYEE-LEVEL RESULTS (fresh upload only)
+    # SAVE EMPLOYEE-LEVEL RESULTS (fresh upload only)
     # ------------------------------------------------------------
 
     if uploaded_file is not None:
-
-        all_risk_scores = pipeline.predict_proba(X)[:, 1]
-        results_df = data.copy()
-        results_df["RiskScore"] = all_risk_scores * 100
-
-        high_threshold = st.session_state.preferences.get(
-            "high_risk_threshold", 66
-        )
-        medium_threshold = st.session_state.preferences.get(
-            "medium_risk_threshold", 33
-        )
-
-        def risk_label(score):
-            if score >= high_threshold:
-                return "High risk"
-            elif score >= medium_threshold:
-                return "Medium risk"
-            else:
-                return "Low risk"
-
-        results_df["RiskLevel"] = results_df["RiskScore"].apply(risk_label)
-
-        id_column = find_column(
-            data, ["EmployeeID", "EmployeeNumber", "ID", "Employee Id"]
-        )
-
-        if id_column is None:
-            results_df["RowNumber"] = range(1, len(results_df) + 1)
-            id_column = "RowNumber"
 
         # Save everything the Employee Lookup page - and this page,
         # on a future visit - needs.
@@ -2294,7 +2466,7 @@ elif page == "Employee Lookup":
             st.subheader("Look up an employee")
 
             selected_id = st.selectbox(
-                "Select an employee",
+                "Select an employee (type to search)",
                 options=results_df[id_column].astype(str).tolist()
             )
 
@@ -2302,37 +2474,145 @@ elif page == "Employee Lookup":
                 results_df[id_column].astype(str) == selected_id
             ].iloc[0]
 
-            lookup_col1, lookup_col2 = st.columns(2)
-
-            with lookup_col1:
-                st.metric("Risk score", f"{employee_row['RiskScore']:.0f}%")
-
-            with lookup_col2:
-                st.write("")
-                st.markdown(
-                    risk_badge_html(employee_row["RiskLevel"]),
-                    unsafe_allow_html=True
-                )
-
             detail_columns = [
                 column for column in st.session_state.data_columns
                 if column not in [target_column, id_column]
             ][:10]
 
-            st.write("**Employee details:**")
+            profile_col, gauge_col, summary_col = st.columns([2, 2, 2])
 
-            details_table = pd.DataFrame({
-                "Attribute": detail_columns,
-                "Value": [employee_row[column] for column in detail_columns]
-            })
+            # ---------------------------------------------
+            # EMPLOYEE CARD (left)
+            # ---------------------------------------------
 
-            st.dataframe(
-                details_table, use_container_width=True, hide_index=True
-            )
+            with profile_col:
+
+                initials = "".join(
+                    [c for c in str(selected_id) if c.isalnum()]
+                )[:2].upper()
+
+                profile_html = (
+                    '<div class="feature-card">'
+                    '<div style="display:flex; align-items:center; '
+                    'gap:12px; margin-bottom:14px;">'
+                    '<div style="width:46px; height:46px; border-radius:50%; '
+                    'background:linear-gradient(135deg,#10B981,#0D9488); '
+                    'display:flex; align-items:center; justify-content:center; '
+                    'font-weight:700; color:#0A0B0A; font-family:\'Space '
+                    'Grotesk\',sans-serif;">'
+                    f'{initials}</div>'
+                    f'<div><h4 style="margin:0;">{selected_id}</h4>'
+                    f'<p style="margin:0;">{risk_badge_html(employee_row["RiskLevel"])}'
+                    '</p></div>'
+                    '</div>'
+                )
+
+                for column in detail_columns[:6]:
+                    profile_html += (
+                        f'<p style="margin:4px 0; font-size:13px;">'
+                        f'<span style="color:#6B726F;">{column}:</span> '
+                        f'<span style="color:#F2F4F3;">'
+                        f'{employee_row[column]}</span></p>'
+                    )
+
+                profile_html += '</div>'
+
+                st.markdown(profile_html, unsafe_allow_html=True)
+
+            # ---------------------------------------------
+            # RISK GAUGE (middle)
+            # ---------------------------------------------
+
+            with gauge_col:
+
+                risk_score = employee_row["RiskScore"]
+                gauge_color = {
+                    "High risk": "#EF4444",
+                    "Medium risk": "#F59E0B",
+                    "Low risk": "#34D399"
+                }.get(employee_row["RiskLevel"], "#8A928F")
+
+                gauge_fig = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=risk_score,
+                    number={
+                        "suffix": "%",
+                        "font": {"color": "#F2F4F3", "size": 36}
+                    },
+                    gauge={
+                        "axis": {
+                            "range": [0, 100],
+                            "tickcolor": "#8A928F",
+                            "tickfont": {"color": "#8A928F"}
+                        },
+                        "bar": {"color": gauge_color},
+                        "bgcolor": "#131615",
+                        "borderwidth": 0,
+                        "steps": [
+                            {"range": [0, 33], "color": "rgba(16,185,129,0.15)"},
+                            {"range": [33, 66], "color": "rgba(245,158,11,0.15)"},
+                            {"range": [66, 100], "color": "rgba(239,68,68,0.15)"},
+                        ],
+                    }
+                ))
+
+                gauge_fig.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#F2F4F3"),
+                    height=230,
+                    margin=dict(t=30, b=10, l=30, r=30)
+                )
+
+                st.plotly_chart(gauge_fig, use_container_width=True)
+                st.markdown(
+                    f'<p style="text-align:center; color:#8A928F; '
+                    f'font-size:13px; margin-top:-10px;">Chance of '
+                    f'leaving</p>',
+                    unsafe_allow_html=True
+                )
+
+            # ---------------------------------------------
+            # QUICK SUMMARY (right)
+            # ---------------------------------------------
+
+            with summary_col:
+
+                summary_html = (
+                    '<div class="feature-card">'
+                    '<h4 style="margin-top:0;">Quick summary</h4>'
+                    f'<p style="font-size:13px;">'
+                    f'<span style="color:#6B726F;">Risk score:</span> '
+                    f'<span style="color:{gauge_color}; font-weight:600;">'
+                    f'{risk_score:.0f} / 100</span></p>'
+                )
+
+                if not pattern_df.empty:
+                    top_summary_features = pattern_df["Feature"].head(3).tolist()
+                    for feature in top_summary_features:
+                        if feature in employee_row.index:
+                            summary_html += (
+                                f'<p style="font-size:13px;">'
+                                f'<span style="color:#6B726F;">{feature}:'
+                                f'</span> <span style="color:#F2F4F3;">'
+                                f'{employee_row[feature]:.1f}</span></p>'
+                            )
+
+                summary_html += '</div>'
+
+                st.markdown(summary_html, unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ---------------------------------------------
+            # TOP FACTORS + PERSONALIZED RECOMMENDATIONS
+            # ---------------------------------------------
 
             if not pattern_df.empty:
 
-                st.write("**Top factors for this employee:**")
+                st.markdown(
+                    '<div class="section-title">Key insights</div>',
+                    unsafe_allow_html=True
+                )
 
                 top_pattern_features = pattern_df["Feature"].head(3).tolist()
                 risk_driving_factors = []
@@ -2357,49 +2637,90 @@ elif page == "Employee Lookup":
                         if closer_to_left:
                             risk_driving_factors.append(feature)
 
+                factor_col1, factor_col2, factor_col3 = st.columns(3)
+                factor_cols = [factor_col1, factor_col2, factor_col3]
+
+                for i, feature in enumerate(top_pattern_features):
+                    if feature in employee_row.index and i < 3:
+
+                        employee_value = employee_row[feature]
+                        feature_pattern = pattern_df[
+                            pattern_df["Feature"] == feature
+                        ].iloc[0]
+                        stayed_avg = feature_pattern["Stayed average"]
+                        left_avg = feature_pattern["Left average"]
+                        closer_to_left = (
+                            abs(employee_value - left_avg)
+                            < abs(employee_value - stayed_avg)
+                        )
                         direction = (
-                            "closer to the pattern seen in employees "
-                            "who left"
+                            "closer to employees who left"
                             if closer_to_left
-                            else "closer to the pattern seen in "
-                            "employees who stayed"
+                            else "closer to employees who stayed"
                         )
 
-                        st.write(
-                            f"- **{feature}**: this employee's value is "
-                            f"**{employee_value:.1f}** ({direction}). "
-                            f"Average for employees who left: "
-                            f"{left_avg:.1f}, average for employees who "
-                            f"stayed: {stayed_avg:.1f}."
-                        )
+                        with factor_cols[i]:
+                            st.markdown(
+                                '<div class="feature-card">'
+                                f'<h4 style="margin-top:0;">{feature}</h4>'
+                                f'<p>This employee: <strong>{employee_value:.1f}'
+                                f'</strong><br>({direction})<br>'
+                                f'Left avg: {left_avg:.1f}<br>'
+                                f'Stayed avg: {stayed_avg:.1f}</p>'
+                                '</div>',
+                                unsafe_allow_html=True
+                            )
+
+                st.markdown("<br>", unsafe_allow_html=True)
 
                 # ------------------------------------------------
                 # PERSONALIZED RECOMMENDATION FOR THIS EMPLOYEE
                 # ------------------------------------------------
 
-                st.write("**Recommended action for this employee:**")
+                st.markdown(
+                    '<div class="section-title">Recommended management '
+                    'actions</div>',
+                    unsafe_allow_html=True
+                )
 
                 if employee_row["RiskLevel"] == "Low risk":
 
-                    st.write(
-                        "No urgent action needed based on this data. "
-                        "Continue regular check-ins as part of normal "
-                        "management practice."
+                    st.markdown(
+                        '<div class="feature-card">No urgent action '
+                        'needed based on this data. Continue regular '
+                        'check-ins as part of normal management '
+                        'practice.</div>',
+                        unsafe_allow_html=True
                     )
 
                 elif risk_driving_factors:
 
-                    for feature in risk_driving_factors:
+                    for number, feature in enumerate(
+                        risk_driving_factors, start=1
+                    ):
 
                         details = get_recommendation_details(feature)
 
-                        st.markdown(f"**{feature}**")
-                        st.write(details["why"])
+                        steps_html = "".join(
+                            f'<p style="margin:4px 0;">• {step}</p>'
+                            for step in details["steps"]
+                        )
 
-                        for step in details["steps"]:
-                            st.write(f"- {step}")
-
-                        st.write("")
+                        st.markdown(
+                            '<div class="feature-card" style="margin-bottom:10px;">'
+                            '<div style="display:flex; gap:12px;">'
+                            '<div style="width:28px; height:28px; '
+                            'border-radius:50%; background:rgba(16,185,129,0.15); '
+                            'color:#34D399; display:flex; align-items:center; '
+                            'justify-content:center; font-weight:700; '
+                            'flex-shrink:0;">'
+                            f'{number}</div>'
+                            f'<div><h4 style="margin:0 0 4px 0;">{feature}'
+                            f'</h4><p style="margin:0 0 8px 0;">'
+                            f'{details["why"]}</p>{steps_html}</div>'
+                            '</div></div>',
+                            unsafe_allow_html=True
+                        )
 
                     st.caption(
                         "These suggestions are based on the factors "
@@ -2411,10 +2732,12 @@ elif page == "Employee Lookup":
                     )
 
                 else:
-                    st.write(
-                        "This employee's risk score isn't clearly "
-                        "explained by the top overall factors - a "
-                        "direct check-in is the best next step."
+                    st.markdown(
+                        '<div class="feature-card">This employee\'s '
+                        'risk score isn\'t clearly explained by the '
+                        'top overall factors - a direct check-in is '
+                        'the best next step.</div>',
+                        unsafe_allow_html=True
                     )
 
         # ----------------------------------------------------
