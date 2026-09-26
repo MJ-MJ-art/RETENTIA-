@@ -31,7 +31,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.impute import SimpleImputer
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score
 
 from supabase import create_client, Client
@@ -1216,11 +1216,13 @@ def make_pipeline(X):
         ]
     )
 
-    model = DecisionTreeClassifier(
-        max_depth=5,
-        min_samples_leaf=10,
+    model = RandomForestClassifier(
+        n_estimators=300,
+        max_depth=8,
+        min_samples_leaf=5,
         random_state=42,
-        class_weight="balanced"
+        class_weight="balanced",
+        n_jobs=-1
     )
 
     pipeline = Pipeline(
@@ -2485,7 +2487,7 @@ elif page == "Analyze":
 The uploaded dataset contains **{len(data)} employees**, with an observed
 attrition rate of **{attrition_rate:.1f}%**.
 
-The decision-tree model achieved **{accuracy:.1%} accuracy**, with
+The random forest model achieved **{accuracy:.1%} accuracy**, with
 **{precision:.1%} precision** and **{recall:.1%} recall** on the held-out
 test set.
 
@@ -3095,7 +3097,7 @@ elif page == "About":
 
     st.write(
         "Retentia cleans an uploaded employee dataset, trains a "
-        "decision-tree model to distinguish employees who left from "
+        "random forest model to distinguish employees who left from "
         "those who stayed, and reports which factors the model relied "
         "on most. It also estimates a risk score for every employee "
         "in the uploaded dataset."
