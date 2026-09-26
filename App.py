@@ -36,6 +36,8 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score
 
 from supabase import create_client, Client
 import plotly.graph_objects as go
+from fpdf import FPDF
+from datetime import date
 
 # ------------------------------------------------------------
 # PAGE CONFIGURATION
@@ -1481,6 +1483,104 @@ def format_time_ago(timestamp_str):
 
     except Exception:
         return timestamp_str
+
+def generate_pdf_report(
+    company_name,
+    total_employees,
+    attrition_rate,
+    retention_rate,
+    top_department,
+    top_department_rate,
+    top_factor_explanations,
+    recommendations,
+    top_risk_employees,
+    id_column
+):
+    """
+    Builds a short, plain-language 1-2 page PDF report a manager can
+    download and forward - no jargon, no raw numbers dump, just what's
+    happening and what to do about it.
+    """
+
+    pdf = FPDF()
+    pdf.add_page()
+
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.cell(0, 10, "Retentia - Employee Retention Report")
+    pdf.ln(10)
+
+    pdf.set_font("Helvetica", "", 11)
+    if company_name:
+        pdf.cell(0, 7, f"Company: {company_name}")
+        pdf.ln(7)
+    pdf.cell(0, 7, f"Date: {date.today().strftime('%B %d, %Y')}")
+    pdf.ln(12)
+
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 8, "Overview")
+    pdf.ln(9)
+    pdf.set_font("Helvetica", "", 11)
+    pdf.multi_cell(
+        0, 7,
+        f"We looked at {total_employees} employees. "
+        f"{retention_rate:.0f} out of every 100 are likely to stay. "
+        f"{attrition_rate:.0f} out of every 100 are at risk of leaving."
+    )
+    pdf.ln(6)
+
+    if top_department:
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(0, 8, "Where to Look First")
+        pdf.ln(9)
+        pdf.set_font("Helvetica", "", 11)
+        pdf.multi_cell(
+            0, 7,
+            f"{top_department} has the highest share of at-risk "
+            f"employees, at about {top_department_rate:.0f}%. Start "
+            f"here."
+        )
+        pdf.ln(6)
+
+    if top_factor_explanations:
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(0, 8, "Why Employees Are Leaving")
+        pdf.ln(9)
+        pdf.set_font("Helvetica", "", 11)
+        for explanation in top_factor_explanations:
+            pdf.multi_cell(0, 7, f"- {explanation}")
+        pdf.ln(6)
+
+    if recommendations:
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(0, 8, "What To Do")
+        pdf.ln(9)
+        pdf.set_font("Helvetica", "", 11)
+        for number, recommendation in enumerate(recommendations, start=1):
+            pdf.multi_cell(0, 7, f"{number}. {recommendation}")
+        pdf.ln(6)
+
+    if top_risk_employees is not None and len(top_risk_employees) > 0:
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(0, 8, "Employees To Check In With Soon")
+        pdf.ln(9)
+        pdf.set_font("Helvetica", "", 11)
+        for _, row in top_risk_employees.iterrows():
+            pdf.multi_cell(
+                0, 7,
+                f"- {row[id_column]}: about {row['RiskScore']:.0f}% "
+                f"risk of leaving"
+            )
+
+    pdf.ln(8)
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.multi_cell(
+        0, 6,
+        "This report is a decision-support summary, not a final "
+        "conclusion. Review it alongside direct conversations with "
+        "employees and managers before making decisions."
+    )
+
+    return bytes(pdf.output())
 # ------------------------------------------------------------
 # PAGE: HOME
 # ------------------------------------------------------------
@@ -2531,6 +2631,67 @@ employee feedback, organizational context, and other evidence.
 
     for number, recommendation in enumerate(recommendations, start=1):
         st.write(f"**{number}.** {recommendation}")
+
+    # ------------------------------------------------------------
+    # DOWNLOADABLE REPORT
+    # ------------------------------------------------------------
+
+    st.markdown(
+        '<div class="section-title">Download report</div>',
+        unsafe_allow_html=True
+    )
+
+    st.write(
+        "A short, plain-language summary you can save or forward - "
+        "what's happening and what to do about it, without the "
+        "underlying data."
+    )
+
+    report_top_department = None
+    report_top_department_rate = 0
+
+    if department_column and department_column in data.columns:
+        dept_risk_for_report = (
+            results_df.groupby(department_column)["RiskLevel"]
+            .apply(lambda s: (s == "High risk").mean() * 100)
+            .sort_values(ascending=False)
+        )
+        if len(dept_risk_for_report) > 0 and dept_risk_for_report.iloc[0] > 0:
+            report_top_department = dept_risk_for_report.index[0]
+            report_top_department_rate = dept_risk_for_report.iloc[0]
+
+    report_factor_explanations = []
+    if importance_df is not None and not importance_df.empty:
+        for feature in importance_df.head(5)["Feature"].tolist():
+            details = get_recommendation_details(feature)
+            if details["why"] not in report_factor_explanations:
+                report_factor_explanations.append(details["why"])
+            if len(report_factor_explanations) == 3:
+                break
+
+    report_top_risk_employees = results_df.sort_values(
+        "RiskScore", ascending=False
+    ).head(5)
+
+    pdf_bytes = generate_pdf_report(
+        company_name=st.session_state.preferences.get("company_name", ""),
+        total_employees=len(results_df),
+        attrition_rate=attrition_rate,
+        retention_rate=100 - attrition_rate,
+        top_department=report_top_department,
+        top_department_rate=report_top_department_rate,
+        top_factor_explanations=report_factor_explanations,
+        recommendations=recommendations,
+        top_risk_employees=report_top_risk_employees,
+        id_column=id_column
+    )
+
+    st.download_button(
+        label="📄 Download management report (PDF)",
+        data=pdf_bytes,
+        file_name="retentia_report.pdf",
+        mime="application/pdf"
+    )
 
     # ------------------------------------------------------------
     # DATA PREVIEW
