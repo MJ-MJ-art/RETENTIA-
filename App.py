@@ -1500,28 +1500,39 @@ def generate_pdf_report(
     Builds a short, plain-language 1-2 page PDF report a manager can
     download and forward - no jargon, no raw numbers dump, just what's
     happening and what to do about it.
+
+    Every cell/multi_cell call explicitly resets the cursor to the
+    left margin first and uses an explicit width (pdf.epw) rather
+    than width=0. Some fpdf2 versions can let the cursor drift right
+    after repeated multi_cell calls, eventually leaving too little
+    width to render text at all - resetting explicitly avoids that
+    regardless of version quirks.
     """
 
     pdf = FPDF()
     pdf.add_page()
+    width = pdf.epw
 
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 10, "Retentia - Employee Retention Report")
-    pdf.ln(10)
+    def write_heading(text, size=14):
+        pdf.set_x(pdf.l_margin)
+        pdf.set_font("Helvetica", "B", size)
+        pdf.cell(width, 8, text)
+        pdf.ln(9)
 
-    pdf.set_font("Helvetica", "", 11)
+    def write_paragraph(text, size=11, style=""):
+        pdf.set_x(pdf.l_margin)
+        pdf.set_font("Helvetica", style, size)
+        pdf.multi_cell(width, 7, text)
+
+    write_heading("Retentia - Employee Retention Report", size=18)
+
     if company_name:
-        pdf.cell(0, 7, f"Company: {company_name}")
-        pdf.ln(7)
-    pdf.cell(0, 7, f"Date: {date.today().strftime('%B %d, %Y')}")
-    pdf.ln(12)
+        write_paragraph(f"Company: {company_name}")
+    write_paragraph(f"Date: {date.today().strftime('%B %d, %Y')}")
+    pdf.ln(6)
 
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 8, "Overview")
-    pdf.ln(9)
-    pdf.set_font("Helvetica", "", 11)
-    pdf.multi_cell(
-        0, 7,
+    write_heading("Overview")
+    write_paragraph(
         f"We looked at {total_employees} employees. "
         f"{retention_rate:.0f} out of every 100 are likely to stay. "
         f"{attrition_rate:.0f} out of every 100 are at risk of leaving."
@@ -1529,12 +1540,8 @@ def generate_pdf_report(
     pdf.ln(6)
 
     if top_department:
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.cell(0, 8, "Where to Look First")
-        pdf.ln(9)
-        pdf.set_font("Helvetica", "", 11)
-        pdf.multi_cell(
-            0, 7,
+        write_heading("Where to Look First")
+        write_paragraph(
             f"{top_department} has the highest share of at-risk "
             f"employees, at about {top_department_rate:.0f}%. Start "
             f"here."
@@ -1542,42 +1549,32 @@ def generate_pdf_report(
         pdf.ln(6)
 
     if top_factor_explanations:
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.cell(0, 8, "Why Employees Are Leaving")
-        pdf.ln(9)
-        pdf.set_font("Helvetica", "", 11)
+        write_heading("Why Employees Are Leaving")
         for explanation in top_factor_explanations:
-            pdf.multi_cell(0, 7, f"- {explanation}")
+            write_paragraph(f"- {explanation}")
         pdf.ln(6)
 
     if recommendations:
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.cell(0, 8, "What To Do")
-        pdf.ln(9)
-        pdf.set_font("Helvetica", "", 11)
+        write_heading("What To Do")
         for number, recommendation in enumerate(recommendations, start=1):
-            pdf.multi_cell(0, 7, f"{number}. {recommendation}")
+            write_paragraph(f"{number}. {recommendation}")
         pdf.ln(6)
 
     if top_risk_employees is not None and len(top_risk_employees) > 0:
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.cell(0, 8, "Employees To Check In With Soon")
-        pdf.ln(9)
-        pdf.set_font("Helvetica", "", 11)
+        write_heading("Employees To Check In With Soon")
         for _, row in top_risk_employees.iterrows():
-            pdf.multi_cell(
-                0, 7,
+            write_paragraph(
                 f"- {row[id_column]}: about {row['RiskScore']:.0f}% "
                 f"risk of leaving"
             )
+        pdf.ln(6)
 
-    pdf.ln(8)
-    pdf.set_font("Helvetica", "I", 9)
-    pdf.multi_cell(
-        0, 6,
+    write_paragraph(
         "This report is a decision-support summary, not a final "
         "conclusion. Review it alongside direct conversations with "
-        "employees and managers before making decisions."
+        "employees and managers before making decisions.",
+        size=9,
+        style="I"
     )
 
     return bytes(pdf.output())
