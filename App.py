@@ -2382,7 +2382,7 @@ elif page == "Analyze":
         top_features = importance_df.head(6).copy()
         max_importance = top_features["Importance"].max()
 
-        bars_html = '<div class="feature-card">'
+        bar_pieces = ['<div class="feature-card">']
 
         for _, row in top_features.iterrows():
 
@@ -2391,22 +2391,27 @@ elif page == "Analyze":
                 if max_importance > 0 else 0
             )
 
-            bars_html += f'''
-            <div style="margin-bottom:14px;">
-                <div style="display:flex; justify-content:space-between;
-                            font-size:13px; color:#F2F4F3; margin-bottom:4px;">
-                    <span>{row["Feature"]}</span>
-                    <span style="color:#34D399;">{pct:.0f}%</span>
-                </div>
-                <div style="background:#1F2422; border-radius:6px; height:8px;">
-                    <div style="background:linear-gradient(90deg,#0D9488,#34D399);
-                                width:{pct:.0f}%; height:8px; border-radius:6px;">
-                    </div>
-                </div>
-            </div>
-            '''
+            # Built as one unindented line per bar (no leading whitespace,
+            # no blank lines between pieces) - Streamlit's markdown
+            # renderer treats indented, blank-line-separated text as a
+            # code block and displays it literally, even with
+            # unsafe_allow_html=True, so this has to stay compact.
+            bar_pieces.append(
+                f'<div style="margin-bottom:14px;">'
+                f'<div style="display:flex; justify-content:space-between; '
+                f'font-size:13px; color:#F2F4F3; margin-bottom:4px;">'
+                f'<span>{row["Feature"]}</span>'
+                f'<span style="color:#34D399;">{pct:.0f}%</span>'
+                f'</div>'
+                f'<div style="background:#1F2422; border-radius:6px; height:8px;">'
+                f'<div style="background:linear-gradient(90deg,#0D9488,#34D399); '
+                f'width:{pct:.0f}%; height:8px; border-radius:6px;"></div>'
+                f'</div>'
+                f'</div>'
+            )
 
-        bars_html += '</div>'
+        bar_pieces.append('</div>')
+        bars_html = "".join(bar_pieces)
 
         st.markdown(bars_html, unsafe_allow_html=True)
 
