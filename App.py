@@ -2774,9 +2774,52 @@ elif page == "Employee Lookup":
 
             st.subheader("Look up an employee")
 
+            search_query = st.text_input(
+                "Search by employee ID, department, or other details",
+                placeholder="Type to search…"
+            )
+
+            # Search across the ID column plus any text/category columns,
+            # so typing a department name, job level, etc. also works -
+            # not just an exact ID.
+            searchable_columns = [id_column] + [
+                column for column in results_df.columns
+                if is_text_column(results_df[column])
+                and column not in [id_column, "RiskLevel"]
+            ]
+
+            if search_query:
+
+                query_lower = search_query.strip().lower()
+
+                match_mask = results_df[searchable_columns].apply(
+                    lambda col: col.astype(str).str.lower().str.contains(
+                        query_lower, na=False
+                    )
+                ).any(axis=1)
+
+                filtered_df = results_df[match_mask]
+
+            else:
+                filtered_df = results_df
+
+            if filtered_df.empty:
+
+                st.warning(
+                    f"No employees match \"{search_query}\". Try a "
+                    f"different search term."
+                )
+                st.stop()
+
+            if search_query:
+                st.caption(
+                    f"{len(filtered_df)} employee"
+                    f"{'s' if len(filtered_df) != 1 else ''} match."
+                )
+
             selected_id = st.selectbox(
-                "Select an employee (type to search)",
-                options=results_df[id_column].astype(str).tolist()
+                "Select an employee",
+                options=filtered_df[id_column].astype(str).tolist()
             )
 
             employee_row = results_df[
