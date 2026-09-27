@@ -2440,30 +2440,51 @@ elif page == "Analyze":
     # ------------------------------------------------------------
 
     st.markdown(
-        '<div class="section-title">Model performance</div>',
+        '<div class="section-title">How reliable is this?</div>',
         unsafe_allow_html=True
     )
 
     if accuracy is not None:
 
-        st.caption(
-            "These metrics describe performance on the held-out test "
-            "data. They should not be interpreted as proof that the "
-            "model will perform identically on future employees."
+        recall_out_of_100 = round(recall * 100)
+        precision_out_of_100 = round(precision * 100)
+        accuracy_out_of_100 = round(accuracy * 100)
+
+        plain_language_html = (
+            '<div class="feature-card">'
+            f'<p>🎯 <strong>Catching real leavers:</strong> out of every '
+            f'100 employees who actually left, this model would have '
+            f'correctly flagged about <strong>{recall_out_of_100}</strong> '
+            f'of them as at-risk beforehand. '
+            f'<span style="color:#6B726F;">(This is called "recall.")</span>'
+            f'</p>'
+            f'<p>✅ <strong>Trusting a "high risk" flag:</strong> when '
+            f'this model says an employee is high risk, it turns out to '
+            f'be right about <strong>{precision_out_of_100}</strong> '
+            f'times out of 100. '
+            f'<span style="color:#6B726F;">(This is called "precision.")'
+            f'</span></p>'
+            f'<p>📊 <strong>Overall correctness:</strong> across all '
+            f'employees, what this model predicted matched what '
+            f'actually happened about <strong>{accuracy_out_of_100}'
+            f'</strong> times out of 100. '
+            f'<span style="color:#6B726F;">(This is called "accuracy.")'
+            f'</span></p>'
+            '</div>'
         )
 
-        col1, col2, col3 = st.columns(3)
+        st.markdown(plain_language_html, unsafe_allow_html=True)
 
-        with col1:
-            st.metric("Accuracy", f"{accuracy:.1%}")
-        with col2:
-            st.metric("Precision", f"{precision:.1%}")
-        with col3:
-            st.metric("Recall", f"{recall:.1%}")
+        st.caption(
+            "These numbers come from testing the model on employees it "
+            "hadn't seen before. They're a helpful guide, not a "
+            "guarantee - always weigh them alongside real conversations "
+            "with employees and managers."
+        )
 
     else:
         st.write(
-            "Model performance metrics aren't available for this "
+            "Reliability information isn't available for this "
             "analysis - upload a file above to run a fresh analysis."
         )
 
@@ -2610,7 +2631,11 @@ employee feedback, organizational context, and other evidence.
     # RECOMMENDATIONS
     # ------------------------------------------------------------
 
-    st.subheader("Recommended organization-wide actions")
+    st.markdown(
+        '<div class="section-title">Recommended organization-wide '
+        'actions</div>',
+        unsafe_allow_html=True
+    )
 
     st.caption(
         "These are company-wide, systemic actions based on overall "
@@ -2618,16 +2643,90 @@ employee feedback, organizational context, and other evidence.
         "see the Employee Lookup page."
     )
 
-    recommendations = [
-        "Review the strongest aggregate attrition patterns and investigate the underlying workplace causes.",
-        "Use employee surveys, stay interviews, and manager feedback to validate the patterns identified by the model.",
-        "Review workload, overtime, career-development opportunities, compensation, and promotion processes where the data indicates potential retention concerns.",
-        "Develop targeted retention initiatives at the team or organizational level rather than treating model predictions as conclusions about individual employees.",
-        "Monitor attrition rates over time and retrain the model periodically as workforce conditions and organizational policies change."
+    recommendations_detailed = [
+        {
+            "title": "Dig into the biggest patterns",
+            "why": (
+                "The numbers above point to specific things - like "
+                "overtime, promotion timing, or satisfaction - but "
+                "numbers alone don't explain why. Understanding the "
+                "real reason is what makes the next steps effective."
+            ),
+            "step": (
+                "Pick the single strongest pattern shown above and "
+                "have HR or a team lead investigate what's actually "
+                "happening on the ground."
+            )
+        },
+        {
+            "title": "Check the pattern against real feedback",
+            "why": (
+                "A pattern in data can point in the right direction "
+                "but still miss the full picture. Talking to people "
+                "confirms whether the model's guess matches reality."
+            ),
+            "step": (
+                "Run a short survey or a few informal 'stay interviews' "
+                "with employees to see if they mention the same issues "
+                "the data is flagging."
+            )
+        },
+        {
+            "title": "Fix the systems, not just the symptoms",
+            "why": (
+                "If overtime, pay, or promotion timing keeps showing "
+                "up as a risk factor, that's usually a policy issue, "
+                "not an individual one."
+            ),
+            "step": (
+                "Review the relevant policy (workload limits, pay "
+                "bands, promotion cycles) and identify one concrete "
+                "change to test."
+            )
+        },
+        {
+            "title": "Act on groups, not just the model's word",
+            "why": (
+                "The model is a guide, not a judge. Treating its "
+                "output as the final say on any one person risks "
+                "unfair decisions and misses the bigger picture."
+            ),
+            "step": (
+                "Use these patterns to shape team-wide or "
+                "department-wide initiatives, and pair them with "
+                "individual conversations from Employee Lookup."
+            )
+        },
+        {
+            "title": "Keep checking back",
+            "why": (
+                "Workforces change. A pattern that's true today may "
+                "shift after a policy change, a new hire wave, or "
+                "a tough quarter."
+            ),
+            "step": (
+                "Re-run this analysis every few months with fresh "
+                "data to see whether the picture is improving."
+            )
+        }
     ]
 
-    for number, recommendation in enumerate(recommendations, start=1):
-        st.write(f"**{number}.** {recommendation}")
+    for item in recommendations_detailed:
+        st.markdown(
+            '<div class="feature-card" style="margin-bottom:10px;">'
+            f'<h4 style="margin-top:0;">{item["title"]}</h4>'
+            f'<p>{item["why"]}</p>'
+            f'<p><strong>Next step:</strong> {item["step"]}</p>'
+            '</div>',
+            unsafe_allow_html=True
+        )
+
+    # A plain-text version for the downloadable PDF report, which
+    # doesn't render HTML cards.
+    recommendations = [
+        f'{item["title"]} - {item["step"]}'
+        for item in recommendations_detailed
+    ]
 
     # ------------------------------------------------------------
     # DOWNLOADABLE REPORT
@@ -3046,6 +3145,19 @@ elif page == "Employee Lookup":
                     )
 
                 elif risk_driving_factors:
+
+                    urgency_text = (
+                        "This employee is flagged as high risk - the "
+                        "factors below are likely contributing now, and "
+                        "acting sooner rather than later matters."
+                        if employee_row["RiskLevel"] == "High risk"
+                        else
+                        "This employee is at moderate risk - not "
+                        "urgent, but worth addressing before it "
+                        "escalates."
+                    )
+
+                    st.write(urgency_text)
 
                     for number, feature in enumerate(
                         risk_driving_factors, start=1
