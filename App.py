@@ -1598,7 +1598,8 @@ def generate_pdf_report(
     top_factor_explanations,
     recommendations,
     top_risk_employees,
-    id_column
+    id_column,
+    cause_breakdown=None
 ):
     """
     Builds a short, plain-language 1-2 page PDF report a manager can
@@ -1611,6 +1612,13 @@ def generate_pdf_report(
     after repeated multi_cell calls, eventually leaving too little
     width to render text at all - resetting explicitly avoids that
     regardless of version quirks.
+
+    cause_breakdown (optional): a list of {"cause": str, "count": int}
+    dicts - one row per Retention Action Center category among
+    high-risk employees (e.g. "Workload & Overtime": 4) - shown as a
+    plain-text breakdown so the PDF matches what's on that page
+    without needing colors or icons, which fpdf2's default font can't
+    render reliably.
     """
 
     pdf = FPDF()
@@ -1650,6 +1658,26 @@ def generate_pdf_report(
             f"employees, at about {top_department_rate:.0f}%. Start "
             f"here."
         )
+        pdf.ln(6)
+
+    if cause_breakdown:
+        write_heading("Where Risk Is Coming From")
+        write_paragraph(
+            "Among employees flagged as high risk, here is the single "
+            "factor most associated with each person's own risk score, "
+            "grouped into broad categories:"
+        )
+        total_high_risk = sum(entry["count"] for entry in cause_breakdown)
+        for entry in cause_breakdown:
+            share = (
+                (entry["count"] / total_high_risk * 100)
+                if total_high_risk else 0
+            )
+            write_paragraph(
+                f"- {entry['cause']}: {entry['count']} employee"
+                f"{'s' if entry['count'] != 1 else ''} "
+                f"(about {share:.0f}% of high-risk employees)"
+            )
         pdf.ln(6)
 
     if top_factor_explanations:
@@ -2875,6 +2903,32 @@ employee feedback, organizational context, and other evidence.
         "RiskScore", ascending=False
     ).head(5)
 
+    # Same primary-cause categories shown on the Retention Action
+    # Center page, counted across every high-risk employee, so the
+    # PDF a manager forwards tells the same story as that page.
+    report_cause_breakdown = []
+
+    if not pattern_df.empty:
+
+        high_risk_for_report = results_df[
+            results_df["RiskLevel"] == "High risk"
+        ]
+
+        if not high_risk_for_report.empty:
+
+            report_causes = high_risk_for_report.apply(
+                lambda row: (
+                    get_employee_primary_cause(row, pattern_df)
+                    or "Unclear"
+                ),
+                axis=1
+            )
+
+            report_cause_breakdown = [
+                {"cause": cause, "count": int(count)}
+                for cause, count in report_causes.value_counts().items()
+            ]
+
     pdf_bytes = generate_pdf_report(
         company_name=st.session_state.preferences.get("company_name", ""),
         total_employees=len(results_df),
@@ -2885,7 +2939,8 @@ employee feedback, organizational context, and other evidence.
         top_factor_explanations=report_factor_explanations,
         recommendations=recommendations,
         top_risk_employees=report_top_risk_employees,
-        id_column=id_column
+        id_column=id_column,
+        cause_breakdown=report_cause_breakdown
     )
 
     st.download_button(
