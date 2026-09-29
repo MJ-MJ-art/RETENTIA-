@@ -1538,6 +1538,23 @@ def get_employee_primary_cause(employee_row, pattern_df):
     return None
 
 
+def cause_badge_html(cause):
+    """
+    Returns an HTML span styled as a colored badge for a retention
+    cause category (Career Growth, Workload & Overtime, etc.),
+    matching the same pill shape as risk_badge_html so the two read
+    as one visual system wherever they appear together.
+    """
+
+    meta = CAUSE_META.get(cause, CAUSE_META["Unclear"])
+
+    return (
+        f'<span class="risk-badge" style="background-color:'
+        f'{meta["color"]}1A; color:{meta["color"]}; border:1px solid '
+        f'{meta["color"]}4D;">{meta["icon"]} {cause}</span>'
+    )
+
+
 def format_time_ago(timestamp_str):
     """
     Converts a Supabase timestamp string into a short "time ago"
@@ -3055,6 +3072,21 @@ elif page == "Employee Lookup":
                     f'{initials}</div>'
                     f'<div><h4 style="margin:0;">{selected_id}</h4>'
                     f'<p style="margin:0;">{risk_badge_html(employee_row["RiskLevel"])}'
+                )
+
+                # A "primary cause" badge next to the risk level - the
+                # same category shown for this employee's group on the
+                # Retention Action Center page, so the two pages agree.
+                if not pattern_df.empty:
+                    employee_cause = get_employee_primary_cause(
+                        employee_row, pattern_df
+                    )
+                    if employee_cause:
+                        profile_html += (
+                            f' {cause_badge_html(employee_cause)}'
+                        )
+
+                profile_html += (
                     '</p></div>'
                     '</div>'
                 )
@@ -3318,7 +3350,34 @@ elif page == "Employee Lookup":
             if department_column and department_column in results_df.columns:
                 ranked_columns.insert(1, department_column)
 
-            ranked_table = results_df[ranked_columns].sort_values(
+            ranked_table = results_df[ranked_columns].copy()
+
+            # "Cause" column - the same primary-cause category shown on
+            # the Retention Action Center page, so someone scanning the
+            # whole roster can spot a pattern (e.g. most of one
+            # department's risk being compensation-driven) without
+            # opening each employee individually. Skipped when there
+            # aren't enough numeric patterns to base it on.
+            CAUSE_DISPLAY = {
+                cause: f'{meta["icon"]} {cause}'
+                for cause, meta in CAUSE_META.items()
+            }
+
+            if not pattern_df.empty:
+                raw_causes = results_df.apply(
+                    lambda row: (
+                        get_employee_primary_cause(row, pattern_df)
+                        or "Unclear"
+                    ),
+                    axis=1
+                )
+                ranked_table["Cause"] = raw_causes.map(
+                    lambda c: CAUSE_DISPLAY.get(c, CAUSE_DISPLAY["Unclear"])
+                )
+            else:
+                ranked_table["Cause"] = "—"
+
+            ranked_table = ranked_table.sort_values(
                 "RiskScore", ascending=False
             )
 
@@ -3330,11 +3389,18 @@ elif page == "Employee Lookup":
                 }
                 return colors.get(value, "")
 
+            def color_cause(value):
+                for cause, meta in CAUSE_META.items():
+                    if value == CAUSE_DISPLAY.get(cause):
+                        return f'color: {meta["color"]}; font-weight: 600;'
+                return ""
+
             try:
                 styled_table = (
                     ranked_table.style
                     .format({"RiskScore": "{:.0f}%"})
                     .map(color_risk_level, subset=["RiskLevel"])
+                    .map(color_cause, subset=["Cause"])
                 )
             except AttributeError:
                 # Older pandas versions use .applymap() instead of
@@ -3344,12 +3410,20 @@ elif page == "Employee Lookup":
                     ranked_table.style
                     .format({"RiskScore": "{:.0f}%"})
                     .applymap(color_risk_level, subset=["RiskLevel"])
+                    .applymap(color_cause, subset=["Cause"])
                 )
 
             st.dataframe(
                 styled_table,
                 use_container_width=True,
                 hide_index=True
+            )
+
+            st.caption(
+                "Cause is the single factor most associated with each "
+                "employee's own risk score - useful for spotting a "
+                "pattern across many people, not a diagnosis for any "
+                "one of them."
             )
 
 
