@@ -545,7 +545,7 @@ def load_analysis_history(user_id):
     try:
         response = (
             supabase.table("retentia_results")
-            .select("id, created_at, results_json")
+            .select("id, created_at, results_json, pattern_json")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
             .execute()
@@ -1553,6 +1553,51 @@ def cause_badge_html(cause):
         f'{meta["color"]}1A; color:{meta["color"]}; border:1px solid '
         f'{meta["color"]}4D;">{meta["icon"]} {cause}</span>'
     )
+
+
+def compute_cause_counts_for_history_entry(entry):
+    """
+    Recomputes the same primary-cause categories used by the
+    Retention Action Center, but for one saved historical analysis
+    (a row from load_analysis_history), so cause trends over time can
+    be plotted on the History page without changing what's stored in
+    Supabase - it just reads the pattern_json saved alongside that
+    run's results_json and re-runs the same per-employee logic.
+
+    Returns:
+        - a dict of {cause: count} if the run has usable data
+        - {} if the run has results but no high-risk employees
+        - None if the run predates pattern_json being saved, or is
+          otherwise missing what's needed to compute a cause at all
+    """
+
+    results_json = entry.get("results_json") or []
+    pattern_json = entry.get("pattern_json") or []
+
+    if not results_json or not pattern_json:
+        return None
+
+    entry_results_df = pd.DataFrame(results_json)
+    entry_pattern_df = pd.DataFrame(pattern_json)
+
+    if "RiskLevel" not in entry_results_df.columns or entry_pattern_df.empty:
+        return None
+
+    entry_high_risk_df = entry_results_df[
+        entry_results_df["RiskLevel"] == "High risk"
+    ]
+
+    if entry_high_risk_df.empty:
+        return {}
+
+    causes = entry_high_risk_df.apply(
+        lambda row: (
+            get_employee_primary_cause(row, entry_pattern_df) or "Unclear"
+        ),
+        axis=1
+    )
+
+    return causes.value_counts().to_dict()
 
 
 def format_time_ago(timestamp_str):
@@ -3744,6 +3789,102 @@ elif page == "History":
         )
 
     else:
+
+        # ----------------------------------------------------
+        # CAUSE TRENDS OVER TIME
+        # ----------------------------------------------------
+        # Re-derives each past analysis's cause breakdown (the same
+        # categories used on the Retention Action Center) so it's
+        # possible to see whether a specific problem - say, workload
+        # - is growing or easing over successive uploads, rather than
+        # only ever seeing today's snapshot.
+
+        MAX_TREND_POINTS = 15
+
+        trend_entries = list(reversed(history[:MAX_TREND_POINTS]))
+
+        trend_rows = []
+
+        for entry in trend_entries:
+
+            cause_counts_for_entry = compute_cause_counts_for_history_entry(
+                entry
+            )
+
+            if cause_counts_for_entry is None:
+                continue
+
+            date_label = str(entry.get("created_at", ""))[:10]
+            trend_row = {"Date": date_label}
+            trend_row.update(cause_counts_for_entry)
+            trend_rows.append(trend_row)
+
+        if len(trend_rows) == 1:
+
+            st.info(
+                "Analyze at least one more dataset to start seeing "
+                "cause trends over time."
+            )
+
+        elif len(trend_rows) >= 2:
+
+            trend_df = pd.DataFrame(trend_rows).fillna(0)
+
+            st.markdown(
+                '<div class="section-title">Cause trends over time'
+                '</div>',
+                unsafe_allow_html=True
+            )
+
+            st.caption(
+                "How many high-risk employees fell into each cause "
+                "category at the time of each past analysis - useful "
+                "for spotting whether a specific problem is growing "
+                "or easing, rather than only seeing today's snapshot."
+            )
+
+            trend_fig = go.Figure()
+
+            for cause in CAUSE_CATEGORIES + ["Unclear"]:
+
+                if cause in trend_df.columns:
+
+                    meta = CAUSE_META.get(cause, CAUSE_META["Unclear"])
+
+                    trend_fig.add_trace(go.Scatter(
+                        x=trend_df["Date"],
+                        y=trend_df[cause],
+                        mode="lines+markers",
+                        name=cause,
+                        line=dict(color=meta["color"], width=2.5),
+                        marker=dict(size=7)
+                    ))
+
+            trend_fig.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#1A1D1C"),
+                height=340,
+                margin=dict(t=20, b=10, l=10, r=10),
+                legend=dict(orientation="h", y=-0.25),
+                xaxis=dict(showgrid=False, title="Analysis date"),
+                yaxis=dict(
+                    showgrid=True,
+                    gridcolor="#E2E8E5",
+                    title="High-risk employees",
+                    rangemode="tozero"
+                )
+            )
+
+            st.plotly_chart(trend_fig, use_container_width=True)
+
+            st.caption(
+                "Based on your most recent "
+                f"{len(trend_rows)} analyses. Runs saved before this "
+                "feature was added may not appear."
+            )
+
+            st.markdown("<br>", unsafe_allow_html=True)
 
         for entry in history:
 
