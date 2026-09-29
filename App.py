@@ -908,6 +908,7 @@ NAV_ICONS = {
     "Home": "🏠",
     "Analyze": "📤",
     "Employee Lookup": "👥",
+    "Retention Action Center": "🎯",
     "History": "🕐",
     "Settings": "⚙️",
     "About": "ℹ️",
@@ -915,7 +916,8 @@ NAV_ICONS = {
 
 page = st.sidebar.radio(
     "Navigate",
-    ["Home", "Analyze", "Employee Lookup", "History", "Settings", "About"],
+    ["Home", "Analyze", "Employee Lookup", "Retention Action Center",
+     "History", "Settings", "About"],
     label_visibility="collapsed",
     key="nav_page",
     format_func=lambda option: f"{NAV_ICONS.get(option, '')}  {option}"
@@ -1452,6 +1454,89 @@ def get_recommendation_details(feature_name):
             "rather than a conclusion on its own."
         ]
     }
+
+
+# ------------------------------------------------------------
+# RETENTION ACTION CENTER HELPERS
+# ------------------------------------------------------------
+# These group high-risk employees by the broad *cause* behind their
+# risk (career growth, workload, compensation, satisfaction) rather
+# than by the raw column name, so the Retention Action Center page
+# can show "12 employees at risk over workload" instead of a wall
+# of individual feature names.
+
+CAUSE_CATEGORIES = ["Career Growth", "Workload & Overtime",
+                     "Compensation", "Job Satisfaction", "Other"]
+
+CAUSE_META = {
+    "Career Growth": {"icon": "📈", "color": "#10B981"},
+    "Workload & Overtime": {"icon": "🔥", "color": "#F59E0B"},
+    "Compensation": {"icon": "💰", "color": "#3B82F6"},
+    "Job Satisfaction": {"icon": "🙂", "color": "#8B5CF6"},
+    "Other": {"icon": "🔎", "color": "#6B726F"},
+    "Unclear": {"icon": "❔", "color": "#8A928F"},
+}
+
+
+def categorize_feature(feature_name):
+    """
+    Maps a raw data column name to one of a small set of
+    human-readable retention "causes". Mirrors the keyword logic in
+    get_recommendation_details() above, so a factor and its
+    recommendation always land in the same bucket.
+    """
+
+    name = str(feature_name).lower()
+
+    if any(word in name for word in ["promot", "training", "tenure", "years"]):
+        return "Career Growth"
+
+    if any(word in name for word in [
+        "overtime", "workload", "hours", "worklife", "work_life", "balance"
+    ]):
+        return "Workload & Overtime"
+
+    if any(word in name for word in ["salary", "income", "pay", "compensation"]):
+        return "Compensation"
+
+    if any(word in name for word in [
+        "satisfaction", "environment", "performance", "attendance"
+    ]):
+        return "Job Satisfaction"
+
+    return "Other"
+
+
+def get_employee_primary_cause(employee_row, pattern_df):
+    """
+    Returns the single strongest cause category for one employee:
+    walks pattern_df (already sorted, strongest company-wide factor
+    first) and returns the category of the first factor where this
+    employee's own value sits closer to the "left" average than the
+    "stayed" average. Returns None if no tracked factor points at
+    this employee at all.
+    """
+
+    for _, feature_pattern in pattern_df.iterrows():
+
+        feature = feature_pattern["Feature"]
+
+        if feature not in employee_row.index:
+            continue
+
+        employee_value = employee_row[feature]
+        stayed_avg = feature_pattern["Stayed average"]
+        left_avg = feature_pattern["Left average"]
+
+        closer_to_left = (
+            abs(employee_value - left_avg) < abs(employee_value - stayed_avg)
+        )
+
+        if closer_to_left:
+            return categorize_feature(feature)
+
+    return None
+
 
 def format_time_ago(timestamp_str):
     """
@@ -2877,9 +2962,21 @@ elif page == "Employee Lookup":
 
             st.subheader("Look up an employee")
 
+            # A "View →" button on the Retention Action Center page sets
+            # this before switching pages so the search box is
+            # pre-filled with that employee's ID - same trick used for
+            # pending_nav above, since a widget's value can't be set
+            # directly once it's already been drawn once.
+            if st.session_state.get("pending_employee_search"):
+                st.session_state["employee_search_query"] = (
+                    st.session_state.pending_employee_search
+                )
+                st.session_state.pending_employee_search = None
+
             search_query = st.text_input(
                 "Search by employee ID, department, or other details",
-                placeholder="Type to search…"
+                placeholder="Type to search…",
+                key="employee_search_query"
             )
 
             # Search across the ID column plus any text/category columns,
@@ -3254,6 +3351,205 @@ elif page == "Employee Lookup":
                 use_container_width=True,
                 hide_index=True
             )
+
+
+# ------------------------------------------------------------
+# PAGE: RETENTION ACTION CENTER
+# ------------------------------------------------------------
+# Groups every high-risk employee by the single strongest factor
+# behind their risk (career growth, workload/overtime, compensation,
+# job satisfaction, or other) so a manager can see where the biggest
+# pockets of risk are and act on a pattern rather than one employee
+# at a time. Clicking a group's "View →" jumps straight into the
+# Employee Lookup page for that person.
+# ------------------------------------------------------------
+
+elif page == "Retention Action Center":
+
+    st.markdown('<div class="page-icon-badge">🎯</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-title">Retention action center</div>',
+        unsafe_allow_html=True
+    )
+
+    if not st.session_state.analyzed:
+
+        st.warning(
+            "No analyzed data yet. Go to the Analyze page and upload a "
+            "CSV first — results will then be available here."
+        )
+
+    else:
+
+        results_df = st.session_state.results_df
+        pattern_df = st.session_state.pattern_df
+        id_column = st.session_state.id_column
+        department_column = st.session_state.department_column
+
+        st.caption(
+            "High-risk employees, grouped by the single factor most "
+            "likely driving their risk score - so you can spot and act "
+            "on a pattern affecting several people, instead of "
+            "reviewing everyone one at a time."
+        )
+
+        if pattern_df.empty:
+
+            st.info(
+                "There isn't enough numeric data in this dataset to "
+                "group causes. See the Analyze page for details on "
+                "what was found."
+            )
+
+        else:
+
+            high_risk_df = results_df[
+                results_df["RiskLevel"] == "High risk"
+            ].copy()
+
+            if high_risk_df.empty:
+
+                st.success(
+                    "No high-risk employees right now - nothing urgent "
+                    "to act on."
+                )
+
+            else:
+
+                high_risk_df["Cause"] = high_risk_df.apply(
+                    lambda row: (
+                        get_employee_primary_cause(row, pattern_df)
+                        or "Unclear"
+                    ),
+                    axis=1
+                )
+
+                cause_counts = high_risk_df["Cause"].value_counts()
+
+                st.markdown(
+                    f'<div class="section-title">{len(high_risk_df)} '
+                    f'high-risk employees, grouped by likely cause</div>',
+                    unsafe_allow_html=True
+                )
+
+                bar_fig = go.Figure(go.Bar(
+                    x=cause_counts.values.tolist(),
+                    y=cause_counts.index.tolist(),
+                    orientation="h",
+                    marker=dict(
+                        color=[
+                            CAUSE_META.get(cause, CAUSE_META["Unclear"])["color"]
+                            for cause in cause_counts.index
+                        ]
+                    ),
+                    text=cause_counts.values.tolist(),
+                    textposition="outside"
+                ))
+
+                bar_fig.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#1A1D1C"),
+                    height=max(220, 70 * len(cause_counts)),
+                    margin=dict(t=10, b=10, l=10, r=50),
+                    xaxis=dict(showgrid=False, zeroline=False),
+                    yaxis=dict(autorange="reversed")
+                )
+
+                st.plotly_chart(bar_fig, use_container_width=True)
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                st.markdown(
+                    '<div class="section-title">Click a cause to see '
+                    'who\'s in it</div>',
+                    unsafe_allow_html=True
+                )
+
+                if "selected_cause" not in st.session_state:
+                    st.session_state.selected_cause = cause_counts.index[0]
+
+                cause_cols = st.columns(len(cause_counts))
+
+                for col, (cause, count) in zip(cause_cols, cause_counts.items()):
+
+                    meta = CAUSE_META.get(cause, CAUSE_META["Unclear"])
+                    is_selected = st.session_state.selected_cause == cause
+
+                    with col:
+                        if st.button(
+                            f"{meta['icon']} {cause} · {count}",
+                            key=f"cause_btn_{cause}",
+                            use_container_width=True,
+                            type="primary" if is_selected else "secondary"
+                        ):
+                            st.session_state.selected_cause = cause
+                            st.rerun()
+
+                selected_cause = st.session_state.selected_cause
+
+                if selected_cause not in cause_counts.index:
+                    selected_cause = cause_counts.index[0]
+                    st.session_state.selected_cause = selected_cause
+
+                meta = CAUSE_META.get(selected_cause, CAUSE_META["Unclear"])
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="section-title">{meta["icon"]} '
+                    f'{selected_cause} - {cause_counts[selected_cause]} '
+                    f'employees</div>',
+                    unsafe_allow_html=True
+                )
+
+                cause_group_df = high_risk_df[
+                    high_risk_df["Cause"] == selected_cause
+                ].sort_values("RiskScore", ascending=False)
+
+                for _, emp_row in cause_group_df.iterrows():
+
+                    emp_id = emp_row[id_column]
+
+                    dept_text = ""
+                    if (
+                        department_column
+                        and department_column in emp_row.index
+                    ):
+                        dept_text = f' · {emp_row[department_column]}'
+
+                    info_col, action_col = st.columns([5, 1])
+
+                    with info_col:
+                        st.markdown(
+                            '<div class="feature-card" style="margin-bottom:8px; '
+                            'display:flex; justify-content:space-between; '
+                            'align-items:center;">'
+                            f'<span><strong>{emp_id}</strong>{dept_text}</span>'
+                            f'<span>{risk_badge_html(emp_row["RiskLevel"])} '
+                            f'<span style="color:#6B726F; font-size:13px;">'
+                            f'{emp_row["RiskScore"]:.0f}%</span></span>'
+                            '</div>',
+                            unsafe_allow_html=True
+                        )
+
+                    with action_col:
+                        if st.button(
+                            "View →",
+                            key=f"view_{selected_cause}_{emp_id}",
+                            use_container_width=True
+                        ):
+                            st.session_state.pending_employee_search = str(emp_id)
+                            st.session_state.pending_nav = "Employee Lookup"
+                            st.rerun()
+
+                st.caption(
+                    "Causes are inferred from the numeric factors that "
+                    "most separate employees who stayed from employees "
+                    "who left in this dataset, applied to each "
+                    "employee's own values. Use this as a starting "
+                    "point for where to look first, not a final "
+                    "diagnosis."
+                )
 
 
 # ------------------------------------------------------------
