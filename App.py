@@ -2796,6 +2796,98 @@ elif page == "Analyze":
 
         st.markdown(insight_cards_html, unsafe_allow_html=True)
 
+    # ------------------------------------------------------------
+    # DEPARTMENT RISK MAP
+    # ------------------------------------------------------------
+    # A full risk-composition breakdown for every department, not
+    # just the single worst one called out in Quick Insights above -
+    # so it's possible to see at a glance where risk is concentrated
+    # across the whole organization, and where it isn't.
+
+    if department_column and department_column in results_df.columns:
+
+        st.markdown(
+            '<div class="section-title">Department risk map</div>',
+            unsafe_allow_html=True
+        )
+
+        st.caption(
+            "Risk composition for every department, sorted by share "
+            "of high-risk employees - worst first."
+        )
+
+        risk_map_colors = {
+            "High risk": "#EF4444",
+            "Medium risk": "#F59E0B",
+            "Low risk": "#34D399"
+        }
+
+        dept_employee_counts = results_df.groupby(department_column).size()
+
+        dept_composition = (
+            results_df.groupby(department_column)["RiskLevel"]
+            .value_counts(normalize=True)
+            .mul(100)
+            .unstack(fill_value=0)
+        )
+
+        for level in risk_map_colors:
+            if level not in dept_composition.columns:
+                dept_composition[level] = 0.0
+
+        dept_composition = dept_composition.sort_values(
+            "High risk", ascending=False
+        )
+
+        map_fig = go.Figure()
+
+        for level in ["Low risk", "Medium risk", "High risk"]:
+            map_fig.add_trace(go.Bar(
+                y=dept_composition.index.astype(str).tolist(),
+                x=dept_composition[level].tolist(),
+                name=level,
+                orientation="h",
+                marker=dict(color=risk_map_colors[level]),
+                hovertemplate=f"{level}: %{{x:.0f}}%<extra></extra>"
+            ))
+
+        map_fig.update_layout(
+            barmode="stack",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#1A1D1C"),
+            height=max(220, 46 * len(dept_composition)),
+            margin=dict(t=10, b=10, l=10, r=10),
+            legend=dict(orientation="h", y=-0.15),
+            xaxis=dict(
+                title="Share of employees (%)",
+                range=[0, 100],
+                showgrid=False
+            ),
+            yaxis=dict(title="", autorange="reversed")
+        )
+
+        st.plotly_chart(map_fig, use_container_width=True)
+
+        dept_summary_table = pd.DataFrame({
+            "Department": dept_composition.index.astype(str),
+            "Employees": [
+                dept_employee_counts[d] for d in dept_composition.index
+            ],
+            "High risk %": dept_composition["High risk"].round(0),
+            "Medium risk %": dept_composition["Medium risk"].round(0),
+            "Low risk %": dept_composition["Low risk"].round(0),
+        }).reset_index(drop=True)
+
+        with st.expander("View exact numbers"):
+            st.dataframe(
+                dept_summary_table,
+                use_container_width=True,
+                hide_index=True
+            )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
     if cleaning_stats_available:
 
         # ------------------------------------------------------------
