@@ -3522,6 +3522,28 @@ elif page == "Retention Action Center":
             "reviewing everyone one at a time."
         )
 
+        # Optional department filter - lets a manager check whether
+        # one team's risk is mostly one cause (e.g. Sales skews
+        # compensation, Engineering skews workload) instead of only
+        # seeing the company-wide mix.
+        selected_department = "All departments"
+
+        if department_column and department_column in results_df.columns:
+
+            department_options = ["All departments"] + sorted(
+                results_df[department_column]
+                .dropna()
+                .astype(str)
+                .unique()
+                .tolist()
+            )
+
+            selected_department = st.selectbox(
+                "Filter by department",
+                department_options,
+                key="action_center_department_filter"
+            )
+
         if pattern_df.empty:
 
             st.info(
@@ -3536,11 +3558,23 @@ elif page == "Retention Action Center":
                 results_df["RiskLevel"] == "High risk"
             ].copy()
 
+            if selected_department != "All departments" and department_column:
+                high_risk_df = high_risk_df[
+                    high_risk_df[department_column].astype(str)
+                    == selected_department
+                ]
+
+            department_phrase = (
+                f" in {selected_department}"
+                if selected_department != "All departments"
+                else ""
+            )
+
             if high_risk_df.empty:
 
                 st.success(
-                    "No high-risk employees right now - nothing urgent "
-                    "to act on."
+                    f"No high-risk employees{department_phrase} right "
+                    f"now - nothing urgent to act on."
                 )
 
             else:
@@ -3557,7 +3591,8 @@ elif page == "Retention Action Center":
 
                 st.markdown(
                     f'<div class="section-title">{len(high_risk_df)} '
-                    f'high-risk employees, grouped by likely cause</div>',
+                    f'high-risk employees{department_phrase}, grouped by '
+                    f'likely cause</div>',
                     unsafe_allow_html=True
                 )
 
