@@ -1170,6 +1170,221 @@ def build_model_data(df, target_column):
     return X, columns_to_drop
 
 
+def compute_data_health_report(
+    row_count,
+    X,
+    y,
+    duplicate_count,
+    empty_columns_removed
+):
+    """
+    Runs a handful of practical checks against the cleaned dataset
+    actually used to train the model (X, y - after cleaning, target
+    handling, and dropping ID-like columns) and turns them into a
+    plain-language health report: a 0-100 score plus a list of
+    checks, each labeled "good", "warning", or "issue".
+
+    This is a quick sanity check on the data itself, separate from
+    model accuracy - a model can report high accuracy on data that's
+    still small, imbalanced, or full of near-useless columns.
+    """
+
+    checks = []
+    score = 100
+
+    # --- Sample size ---
+    if row_count < 30:
+        checks.append({
+            "status": "issue",
+            "title": "Very small dataset",
+            "detail": (
+                f"Only {row_count} rows remain after cleaning. Model "
+                f"metrics and risk scores will be unstable - treat "
+                f"results as illustrative, not decision-grade."
+            )
+        })
+        score -= 25
+    elif row_count < 100:
+        checks.append({
+            "status": "warning",
+            "title": "Small dataset",
+            "detail": (
+                f"{row_count} rows remain after cleaning. Results are "
+                f"usable but will get more reliable with more data."
+            )
+        })
+        score -= 10
+    else:
+        checks.append({
+            "status": "good",
+            "title": "Dataset size",
+            "detail": f"{row_count} rows - enough for a stable model."
+        })
+
+    # --- Class balance ---
+    if y is not None and len(y) > 0:
+
+        positive_rate = y.mean() * 100
+        minority_rate = min(positive_rate, 100 - positive_rate)
+
+        if minority_rate < 5:
+            checks.append({
+                "status": "issue",
+                "title": "Severe class imbalance",
+                "detail": (
+                    f"Only about {minority_rate:.1f}% of employees "
+                    f"are in the minority class (stayed or left). "
+                    f"The model has very few real examples to learn "
+                    f"from for that group."
+                )
+            })
+            score -= 20
+        elif minority_rate < 15:
+            checks.append({
+                "status": "warning",
+                "title": "Class imbalance",
+                "detail": (
+                    f"About {minority_rate:.1f}% of employees are in "
+                    f"the minority class. This is common for "
+                    f"attrition data and is already accounted for "
+                    f"during training, but treat scores with a "
+                    f"little extra caution."
+                )
+            })
+            score -= 5
+        else:
+            checks.append({
+                "status": "good",
+                "title": "Class balance",
+                "detail": (
+                    f"About {minority_rate:.1f}% minority class - a "
+                    f"reasonable split for the model to learn from."
+                )
+            })
+
+    # --- Missing values in predictor columns (before imputation) ---
+    if X is not None and len(X.columns) > 0:
+
+        missing_shares = X.isna().mean() * 100
+        high_missing = missing_shares[missing_shares > 30]
+        moderate_missing = missing_shares[
+            (missing_shares > 10) & (missing_shares <= 30)
+        ]
+
+        if len(high_missing) > 0:
+            checks.append({
+                "status": "issue",
+                "title": "Columns with heavy missing data",
+                "detail": (
+                    "Over 30% of values are missing in: "
+                    + ", ".join(high_missing.index.tolist())
+                    + ". These are filled in automatically during "
+                    "training, but may add more noise than signal."
+                )
+            })
+            score -= 15
+        if len(moderate_missing) > 0:
+            checks.append({
+                "status": "warning",
+                "title": "Columns with some missing data",
+                "detail": (
+                    "10-30% of values are missing in: "
+                    + ", ".join(moderate_missing.index.tolist())
+                    + ". Handled automatically, but worth checking "
+                    "the source data if this is unexpected."
+                )
+            })
+            score -= 5
+        if len(high_missing) == 0 and len(moderate_missing) == 0:
+            checks.append({
+                "status": "good",
+                "title": "Missing data",
+                "detail": (
+                    "No predictor column has significant missing data."
+                )
+            })
+
+    # --- Columns that never vary (no predictive value) ---
+    constant_columns = []
+
+    if X is not None:
+        for column in X.columns:
+            non_null = X[column].dropna()
+            if len(non_null) > 0 and non_null.nunique() <= 1:
+                constant_columns.append(column)
+
+    if constant_columns:
+        checks.append({
+            "status": "warning",
+            "title": "Columns with a single value",
+            "detail": (
+                "These columns never change, so they can't help "
+                "predict attrition: "
+                + ", ".join(map(str, constant_columns))
+            )
+        })
+        score -= 5 * min(len(constant_columns), 2)
+
+    # --- Text columns that look like identifiers ---
+    high_cardinality_columns = []
+
+    if X is not None and len(X) > 0:
+
+        categorical_columns = X.select_dtypes(
+            exclude=["number"]
+        ).columns
+
+        for column in categorical_columns:
+            unique_count = X[column].nunique(dropna=True)
+            if unique_count > max(20, len(X) * 0.5):
+                high_cardinality_columns.append(column)
+
+    if high_cardinality_columns:
+        checks.append({
+            "status": "warning",
+            "title": "Columns that look like identifiers",
+            "detail": (
+                "These text columns have almost as many unique "
+                "values as there are employees, which usually means "
+                "they're an ID rather than a real pattern: "
+                + ", ".join(map(str, high_cardinality_columns))
+            )
+        })
+        score -= 5
+
+    # --- Already-handled cleaning issues, shown as reassurance ---
+    if duplicate_count > 0:
+        checks.append({
+            "status": "good",
+            "title": "Duplicate rows removed",
+            "detail": (
+                f"{duplicate_count} duplicate row(s) were found and "
+                f"removed automatically before analysis."
+            )
+        })
+
+    if empty_columns_removed:
+        checks.append({
+            "status": "good",
+            "title": "Empty columns removed",
+            "detail": (
+                "These columns had no data at all and were dropped: "
+                + ", ".join(map(str, empty_columns_removed))
+            )
+        })
+
+    score = max(0, min(100, score))
+
+    if score >= 80:
+        label = "Good"
+    elif score >= 50:
+        label = "Fair"
+    else:
+        label = "Needs attention"
+
+    return {"score": score, "label": label, "checks": checks}
+
+
 def make_pipeline(X):
     """
     Builds preprocessing + decision tree pipeline.
@@ -2582,6 +2797,75 @@ elif page == "Analyze":
         st.markdown(insight_cards_html, unsafe_allow_html=True)
 
     if cleaning_stats_available:
+
+        # ------------------------------------------------------------
+        # DATA HEALTH CHECK
+        # ------------------------------------------------------------
+        # A quick sanity check on the data itself - separate from
+        # model accuracy, since a model can report solid accuracy on
+        # data that's still small, imbalanced, or full of near-useless
+        # columns. Shown right after a fresh upload, using the same
+        # X/y actually fed to the model.
+
+        health_report = compute_data_health_report(
+            row_count=len(data),
+            X=X,
+            y=y,
+            duplicate_count=duplicate_count,
+            empty_columns_removed=empty_columns
+        )
+
+        st.markdown(
+            '<div class="section-title">Data health check</div>',
+            unsafe_allow_html=True
+        )
+
+        health_colors = {
+            "Good": "#10B981",
+            "Fair": "#F59E0B",
+            "Needs attention": "#EF4444"
+        }
+        health_color = health_colors.get(health_report["label"], "#8A928F")
+
+        st.markdown(
+            '<div class="feature-card" style="display:flex; '
+            'align-items:center; gap:16px; margin-bottom:14px;">'
+            '<div style="font-family:\'Space Grotesk\',sans-serif; '
+            f'font-size:32px; font-weight:700; color:{health_color};">'
+            f'{health_report["score"]}/100</div>'
+            '<div>'
+            f'<p style="margin:0; font-weight:600; color:{health_color};">'
+            f'{health_report["label"]}</p>'
+            '<p style="margin:0; color:#6B726F; font-size:13px;">'
+            'How reliable this dataset is for training a model and '
+            'trusting the risk scores it produces.</p>'
+            '</div></div>',
+            unsafe_allow_html=True
+        )
+
+        status_icons = {"good": "✅", "warning": "⚠️", "issue": "🔴"}
+
+        for check in health_report["checks"]:
+
+            icon = status_icons.get(check["status"], "•")
+
+            st.markdown(
+                '<div class="feature-card" style="margin-bottom:8px;">'
+                f'<p style="margin:0; font-weight:600;">{icon} '
+                f'{check["title"]}</p>'
+                '<p style="margin:4px 0 0 0; font-size:13px; '
+                f'color:#5B635F;">{check["detail"]}</p>'
+                '</div>',
+                unsafe_allow_html=True
+            )
+
+        st.caption(
+            "This checks the data itself, not the model's predictions "
+            "- a model can still report solid accuracy on data that "
+            "has some of these issues."
+        )
+
+        st.markdown("<br>", unsafe_allow_html=True)
 
         with st.expander("View cleaning summary"):
 
