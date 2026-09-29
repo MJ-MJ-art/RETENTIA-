@@ -600,6 +600,97 @@ def load_specific_analysis(row_id):
         return False
 
 
+ACTION_STATUSES = ["Not started", "Contacted", "In progress", "Resolved"]
+
+ACTION_STATUS_META = {
+    "Not started": {"icon": "⚪", "color": "#8A928F"},
+    "Contacted": {"icon": "📞", "color": "#3B82F6"},
+    "In progress": {"icon": "🔄", "color": "#F59E0B"},
+    "Resolved": {"icon": "✅", "color": "#10B981"},
+}
+
+
+def load_employee_actions(user_id):
+    """
+    Loads every saved action-tracking status for this user's
+    employees, keyed by employee ID (as a plain string, so it
+    matches however the ID column renders elsewhere in the app).
+
+    This lives in its own table, separate from retentia_results,
+    because a tracked status like "Contacted" needs to survive
+    across a fresh CSV upload of the same roster - it's tied to the
+    employee, not to any one analysis run.
+    """
+
+    try:
+        response = (
+            supabase.table("retentia_employee_actions")
+            .select("*")
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        return {
+            str(row["employee_id"]): {
+                "status": row.get("status") or "Not started",
+                "note": row.get("note") or "",
+                "updated_at": row.get("updated_at")
+            }
+            for row in (response.data or [])
+        }
+
+    except Exception:
+        # Most likely the retentia_employee_actions table hasn't been
+        # created in Supabase yet - fail quietly with "nothing
+        # tracked yet" rather than breaking the page around it.
+        return {}
+
+
+def save_employee_action(user_id, employee_id, status, note=""):
+    """
+    Saves (or updates) the tracked action status for one employee.
+    Uses upsert on the (user_id, employee_id) pair, so calling this
+    again for the same employee updates their existing row instead
+    of creating a duplicate.
+    """
+
+    from datetime import datetime, timezone
+
+    try:
+        supabase.table("retentia_employee_actions").upsert({
+            "user_id": user_id,
+            "employee_id": str(employee_id),
+            "status": status,
+            "note": note,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }, on_conflict="user_id,employee_id").execute()
+
+        return True
+
+    except Exception as error:
+        st.warning(
+            f"Could not save that status - the tracking table may "
+            f"not be set up yet in your database. ({error})"
+        )
+        return False
+
+
+def action_status_badge_html(status):
+    """
+    Returns an HTML span styled as a colored badge for a tracked
+    action status, matching the same pill shape used for risk levels
+    and causes so all three read as one visual system.
+    """
+
+    meta = ACTION_STATUS_META.get(status, ACTION_STATUS_META["Not started"])
+
+    return (
+        f'<span class="risk-badge" style="background-color:'
+        f'{meta["color"]}1A; color:{meta["color"]}; border:1px solid '
+        f'{meta["color"]}4D;">{meta["icon"]} {status}</span>'
+    )
+
+
 # ------------------------------------------------------------
 # LOGIN / SIGN UP GATE
 # ------------------------------------------------------------
@@ -3436,6 +3527,7 @@ elif page == "Employee Lookup":
         id_column = st.session_state.id_column
         department_column = st.session_state.department_column
         target_column = st.session_state.target_column
+        employee_actions = load_employee_actions(st.session_state.user.id)
 
         st.caption(
             "Risk scores are calculated for every employee in the "
@@ -3519,6 +3611,15 @@ elif page == "Employee Lookup":
                 results_df[id_column].astype(str) == selected_id
             ].iloc[0]
 
+            # employee_actions was already loaded once above, at the
+            # top of the Employee Lookup page - reused here for both
+            # the profile badge and the "Track action taken" section
+            # below, and again for the full ranking table's Status
+            # column, without querying Supabase more than once.
+            current_action = employee_actions.get(
+                selected_id, {"status": "Not started", "note": ""}
+            )
+
             detail_columns = [
                 column for column in st.session_state.data_columns
                 if column not in [target_column, id_column]
@@ -3561,6 +3662,14 @@ elif page == "Employee Lookup":
                         profile_html += (
                             f' {cause_badge_html(employee_cause)}'
                         )
+
+                # Tracked action status, if anything's been logged for
+                # this employee - shown even when it's still the
+                # default "Not started", so it's obvious tracking is
+                # available here.
+                profile_html += (
+                    f' {action_status_badge_html(current_action["status"])}'
+                )
 
                 profile_html += (
                     '</p></div>'
@@ -3813,6 +3922,59 @@ elif page == "Employee Lookup":
                         unsafe_allow_html=True
                     )
 
+            # ---------------------------------------------
+            # TRACK ACTION TAKEN
+            # ---------------------------------------------
+            # Lets a manager record what's actually been done about
+            # this employee - separate from the model's analysis, and
+            # tied to their employee ID so it carries over even after
+            # the next CSV upload re-runs the whole analysis.
+
+            st.markdown(
+                '<div class="section-title">Track action taken</div>',
+                unsafe_allow_html=True
+            )
+
+            status_col, note_col = st.columns([1, 2])
+
+            with status_col:
+                selected_status = st.selectbox(
+                    "Status",
+                    ACTION_STATUSES,
+                    index=ACTION_STATUSES.index(current_action["status"])
+                    if current_action["status"] in ACTION_STATUSES
+                    else 0,
+                    key=f"status_select_{selected_id}"
+                )
+
+            with note_col:
+                note_input = st.text_input(
+                    "Note (optional)",
+                    value=current_action["note"],
+                    placeholder="e.g. Had a 1:1 on Tuesday, discussing "
+                                "a promotion timeline.",
+                    key=f"status_note_{selected_id}"
+                )
+
+            if st.button(
+                "💾 Save status", key=f"save_status_{selected_id}"
+            ):
+                if save_employee_action(
+                    st.session_state.user.id,
+                    selected_id,
+                    selected_status,
+                    note_input
+                ):
+                    st.success(f"Saved: {selected_id} marked as "
+                               f"\"{selected_status}\".")
+                    st.rerun()
+
+            if current_action.get("updated_at"):
+                st.caption(
+                    f"Last updated "
+                    f"{format_time_ago(current_action['updated_at'])}."
+                )
+
         # ----------------------------------------------------
         # TAB: FULL RANKING
         # ----------------------------------------------------
@@ -3853,6 +4015,22 @@ elif page == "Employee Lookup":
             else:
                 ranked_table["Cause"] = "—"
 
+            # "Status" column - whatever's been tracked for this
+            # employee on the Employee Lookup page (defaults to "Not
+            # started" if nothing's been logged yet).
+            STATUS_DISPLAY = {
+                status: f'{meta["icon"]} {status}'
+                for status, meta in ACTION_STATUS_META.items()
+            }
+
+            ranked_table["Status"] = results_df[id_column].astype(str).map(
+                lambda emp_id: STATUS_DISPLAY[
+                    employee_actions.get(
+                        emp_id, {"status": "Not started"}
+                    )["status"]
+                ]
+            )
+
             ranked_table = ranked_table.sort_values(
                 "RiskScore", ascending=False
             )
@@ -3871,12 +4049,19 @@ elif page == "Employee Lookup":
                         return f'color: {meta["color"]}; font-weight: 600;'
                 return ""
 
+            def color_status(value):
+                for status, meta in ACTION_STATUS_META.items():
+                    if value == STATUS_DISPLAY.get(status):
+                        return f'color: {meta["color"]}; font-weight: 600;'
+                return ""
+
             try:
                 styled_table = (
                     ranked_table.style
                     .format({"RiskScore": "{:.0f}%"})
                     .map(color_risk_level, subset=["RiskLevel"])
                     .map(color_cause, subset=["Cause"])
+                    .map(color_status, subset=["Status"])
                 )
             except AttributeError:
                 # Older pandas versions use .applymap() instead of
@@ -3887,6 +4072,7 @@ elif page == "Employee Lookup":
                     .format({"RiskScore": "{:.0f}%"})
                     .applymap(color_risk_level, subset=["RiskLevel"])
                     .applymap(color_cause, subset=["Cause"])
+                    .applymap(color_status, subset=["Status"])
                 )
 
             st.dataframe(
@@ -3899,7 +4085,8 @@ elif page == "Employee Lookup":
                 "Cause is the single factor most associated with each "
                 "employee's own risk score - useful for spotting a "
                 "pattern across many people, not a diagnosis for any "
-                "one of them."
+                "one of them. Status reflects what's been tracked for "
+                "that employee on the Employee Lookup page."
             )
 
 
@@ -3935,6 +4122,7 @@ elif page == "Retention Action Center":
         pattern_df = st.session_state.pattern_df
         id_column = st.session_state.id_column
         department_column = st.session_state.department_column
+        employee_actions = load_employee_actions(st.session_state.user.id)
 
         st.caption(
             "High-risk employees, grouped by the single factor most "
@@ -3965,6 +4153,11 @@ elif page == "Retention Action Center":
                 key="action_center_department_filter"
             )
 
+        hide_resolved = st.checkbox(
+            "Hide employees already marked \"Resolved\"",
+            key="action_center_hide_resolved"
+        )
+
         if pattern_df.empty:
 
             st.info(
@@ -3983,6 +4176,15 @@ elif page == "Retention Action Center":
                 high_risk_df = high_risk_df[
                     high_risk_df[department_column].astype(str)
                     == selected_department
+                ]
+
+            if hide_resolved:
+                high_risk_df = high_risk_df[
+                    high_risk_df[id_column].astype(str).map(
+                        lambda emp_id: employee_actions.get(
+                            emp_id, {"status": "Not started"}
+                        )["status"]
+                    ) != "Resolved"
                 ]
 
             department_phrase = (
@@ -4104,6 +4306,10 @@ elif page == "Retention Action Center":
 
                     info_col, action_col = st.columns([5, 1])
 
+                    emp_status = employee_actions.get(
+                        str(emp_id), {"status": "Not started"}
+                    )["status"]
+
                     with info_col:
                         st.markdown(
                             '<div class="feature-card" style="margin-bottom:8px; '
@@ -4111,6 +4317,7 @@ elif page == "Retention Action Center":
                             'align-items:center;">'
                             f'<span><strong>{emp_id}</strong>{dept_text}</span>'
                             f'<span>{risk_badge_html(emp_row["RiskLevel"])} '
+                            f'{action_status_badge_html(emp_status)} '
                             f'<span style="color:#6B726F; font-size:13px;">'
                             f'{emp_row["RiskScore"]:.0f}%</span></span>'
                             '</div>',
