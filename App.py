@@ -1168,12 +1168,65 @@ def prepare_target(df):
     return target_column, target
 
 
+def _neutralize_formula_cell(value):
+    """
+    Defuses one cell against "CSV/Excel formula injection": if a
+    spreadsheet cell's text starts with =, +, -, or @, Excel and
+    Google Sheets can treat it as a formula rather than plain text
+    when the data is later opened there - which is how a
+    booby-trapped upload could run something or leak data on
+    someone's computer (never on this app's own server, since
+    pandas never executes cell content as code).
+
+    A leading + or - is only risky if what follows isn't just a
+    plain number - "-5000" is a perfectly normal negative value
+    stored as text (e.g. income), so that's left untouched; something
+    like "-2+3+cmd|' /c calc'!A1" is not a number, so it gets
+    defused.
+    """
+
+    if not isinstance(value, str) or not value:
+        return value
+
+    first_char = value[0]
+
+    if first_char in ("=", "@"):
+        return "'" + value
+
+    if first_char in ("+", "-"):
+        try:
+            float(value)
+            return value
+        except ValueError:
+            return "'" + value
+
+    return value
+
+
+def neutralize_formula_injection(df):
+    """
+    Applies _neutralize_formula_cell() to every text column in the
+    uploaded dataset, run once immediately on upload - before any
+    other cleaning - so nothing downstream (analysis, display, a
+    future CSV/Excel export) ever carries a live spreadsheet formula
+    through from the original file.
+    """
+
+    df = df.copy()
+
+    for column in df.columns:
+        if is_text_column(df[column]):
+            df[column] = df[column].apply(_neutralize_formula_cell)
+
+    return df
+
+
 def clean_dataset(raw_df):
     """
     Performs basic automated cleaning.
     """
 
-    df = raw_df.copy()
+    df = neutralize_formula_injection(raw_df)
 
     original_rows, original_columns = df.shape
 
@@ -2401,6 +2454,30 @@ elif page == "Analyze":
         "For testing, you can generate a synthetic dataset using "
         "`generate_data.py`."
     )
+
+    # ----------------------------------------------------------------
+    # FILE SIZE CHECK
+    # ----------------------------------------------------------------
+    # Streamlit itself already caps any upload at 200MB, but that's a
+    # blunt, generic default - a realistic HR dataset (a few thousand
+    # rows) is usually well under 5MB. Anything far larger than that
+    # is almost certainly not normal employee data, and could still
+    # strain the app well before hitting Streamlit's own ceiling.
+
+    MAX_UPLOAD_SIZE_MB = 25
+
+    if (
+        uploaded_file is not None
+        and uploaded_file.size > MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    ):
+        uploaded_size_mb = uploaded_file.size / (1024 * 1024)
+        st.error(
+            f"This file is {uploaded_size_mb:.0f}MB, which is "
+            f"unusually large for employee data (the limit here is "
+            f"{MAX_UPLOAD_SIZE_MB}MB). Please double-check the file, "
+            f"or split it into smaller batches."
+        )
+        st.stop()
 
     # ----------------------------------------------------------------
     # Decide what to show: a fresh upload, a previously saved analysis
